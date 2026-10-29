@@ -58,6 +58,8 @@ WS_OPEN_TIMEOUT_S = 15.0
 POLL_INTERVAL_S = 60.0
 RECONNECT_DELAY_S = 10.0
 RECONNECT_DELAY_MAX_S = 300.0
+# Where Fetch's public site serves channel logos.
+PUBLIC_URL = "https://www.fetchtv.com.au"
 # Guide channel list (names, logos) changes rarely.
 CHANNEL_LIST_MAX_AGE_S = 24 * 3600
 
@@ -217,6 +219,21 @@ def _to_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _logo_url(key: str, raw: dict[str, Any]) -> str | None:
+    """
+    A logo URL that works outside Fetch's network, or None.
+
+    The guide's own image URLs point at ``static.lb.i.fetchtv.com.au``, a name
+    that only exists inside Fetch's network, so a Remote can't load them. The
+    public site serves subscription (streaming) channels' logos by guide key
+    instead. Free-to-air channels have no logo there, so they get none.
+    """
+    streaming = any(s.get("type") == "hls" for s in raw.get("sources") or [])
+    if not streaming or not _logo(raw):
+        return None
+    return f"{PUBLIC_URL}/v2/epg/channels/{key}/image"
+
+
 def _logo(raw: dict[str, Any]) -> str | None:
     images = raw.get("images") or {}
     for key in ("channel_logo_focus", "channel_logo"):
@@ -246,7 +263,7 @@ class Guide:
                     epg_id=str(key),
                     number=_to_int(raw.get("number")),
                     name=str(raw.get("name") or key),
-                    logo=_logo(raw),
+                    logo=_logo_url(str(key), raw),
                     subscription=True,
                 )
                 for key, raw in channels.items()
@@ -256,6 +273,11 @@ class Guide:
             key=lambda c: (c.number, c.name),
         )
         self._programs: dict[str, list[Program]] = {}
+        # Where free-to-air logos live isn't known yet - show what the guide has.
+        for key, raw in channels.items():
+            if not raw.get("subscribed") and raw.get("images"):
+                _LOG.debug("Guide free-to-air sample: key=%s images=%s", key, raw["images"])
+                break
 
     def epg_key(self, channel_id: str) -> str | None:
         """Guide key for a channel id as reported by a box."""
@@ -264,7 +286,7 @@ class Guide:
     def logo(self, epg_key: str) -> str | None:
         """Channel logo URL for a guide key."""
         raw = self._raw.get(epg_key)
-        return _logo(raw) if raw else None
+        return _logo_url(epg_key, raw) if raw else None
 
     def name(self, epg_key: str) -> str | None:
         """Channel name for a guide key."""

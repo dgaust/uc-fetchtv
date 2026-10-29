@@ -69,7 +69,7 @@ assert a[Attr.STATE] == States.PLAYING, a
 assert a[Attr.MEDIA_TITLE] == "Hard Quiz"
 assert a[Attr.MEDIA_ARTIST] == "ABC Entertains"
 assert a[Attr.MEDIA_ALBUM] == "Episode 19"
-assert a[Attr.MEDIA_IMAGE_URL] == "http://img/abc-ent.png"
+assert a[Attr.MEDIA_IMAGE_URL] == ""  # no public free-to-air logo
 assert a[Attr.MEDIA_DURATION] == 1800 and a[Attr.MEDIA_POSITION] == 600
 assert a[Attr.SOURCE] == "23 ABC Entertains"
 assert a[Attr.SOURCE_LIST] == ["2 ABC TV", "23 ABC Entertains", "159 beIN SPORTS 3"]
@@ -81,7 +81,7 @@ box.apply_playback({"playbackType": "HLS", "channelId": 1850, "mediaTitle": "beI
 a = ent.attributes(client, box, None, NOW)
 assert a[Attr.MEDIA_TITLE] == "beIN SPORTS 3" and a[Attr.MEDIA_ARTIST] == "", a
 assert a[Attr.SOURCE] == "159 beIN SPORTS 3"
-assert a[Attr.MEDIA_IMAGE_URL] == "http://img/bein3.png"
+assert a[Attr.MEDIA_IMAGE_URL] == "https://www.fetchtv.com.au/v2/epg/channels/1850/image"
 assert a[Attr.MEDIA_DURATION] == 0
 
 # Paused / idle / standby / unreachable.
@@ -176,10 +176,10 @@ assert [i.media_id for i in root.media.items] == ["fta", "subscription"], root
 assert root.media.items[0].subtitle == "2 channels" and root.pagination.count == 2
 fta = browse("fta")
 assert [i.media_id for i in fta.media.items] == ["30018294", "30411316"]
-assert fta.media.items[1].thumbnail == "http://img/abc-ent.png" and fta.media.items[1].can_play
-assert fta.media.items[0].thumbnail == "icon://uc:tv", "no logo -> generic icon"
+assert fta.media.items[1].can_play
+assert fta.media.items[1].thumbnail == "icon://uc:tv", "no public logo -> generic icon"
 sub = browse("subscription")
-assert sub.media.items[0].thumbnail == "http://img/bein3.png" and sub.media.items[0].subtitle == "159"
+assert sub.media.items[0].thumbnail == "https://www.fetchtv.com.au/v2/epg/channels/1850/image" and sub.media.items[0].subtitle == "159"
 paged = browse("fta", page=2, limit=1)
 assert [i.media_id for i in paged.media.items] == ["30411316"] and paged.pagination.count == 2
 assert browse("nope") == StatusCodes.NOT_FOUND

@@ -48,8 +48,8 @@ async def main():
     # subscribed subscription channels only.
     labels = [c.label for c in client.channels_for(lounge)]
     assert labels == ["2 ABC TV", "23 ABC Entertains", "159 beIN SPORTS 3"], labels
-    # Free-to-air channels get their logo from the guide.
-    assert client.channels_for(lounge)[1].logo == "http://img/abc-ent.png"
+    # Free-to-air logos aren't served publicly; the guide's own URLs are internal.
+    assert client.channels_for(lounge)[1].logo is None
 
     # A regional DVB id resolves to its guide channel and programme.
     channel = client.current_channel(lounge)
