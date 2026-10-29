@@ -11,6 +11,7 @@ README.md for the architecture.
 
 import logging
 import os
+import re
 
 import ucapi
 
@@ -63,6 +64,15 @@ async def on_subscribe_entities(entity_ids: list[str]) -> None:
     box_manager.push_subscribed_state(entity_ids)
 
 
+def _redact_setup_data(record: logging.LogRecord) -> bool:
+    """Blank the activation code and PIN out of ucapi's message logging."""
+    message = record.getMessage()
+    if "setup_data" in message:
+        record.msg = re.sub(r'("setup_data"\s*:\s*)\{[^}]*\}', r'\1{"redacted": true}', message)
+        record.args = None
+    return True
+
+
 async def main() -> None:
     """Load configuration and start the integration driver."""
     logging.basicConfig(
@@ -72,6 +82,13 @@ async def main() -> None:
     level = os.getenv("UC_LOG_LEVEL", "INFO").upper()
     for name in ("driver", "box_manager", "setup_flow", "entities", "config", "fetchtv"):
         logging.getLogger(name).setLevel(level)
+    # ucapi logs every websocket message at DEBUG, including the setup request
+    # that carries the activation code and PIN. Keep it quiet unless asked for,
+    # and never let those two values reach the log.
+    ucapi_log = logging.getLogger("ucapi")
+    ucapi_log.setLevel(level if level == "DEBUG" else "INFO")
+    logging.getLogger("ucapi.api").setLevel(ucapi_log.level)
+    logging.getLogger("ucapi.api").addFilter(_redact_setup_data)
 
     config.init(api.config_dir_path)
 
