@@ -185,7 +185,10 @@ Sydney), the same way the Fetch mobile app does, and Fetch's service relays
 commands to the box. It feels instant because the boxes keep a connection open
 to Fetch and the servers are close: connecting to them takes about 30 ms from
 Australian broadband. It also means the driver needs internet access, and that
-it stops working if Fetch's service is down.
+it stops working if Fetch's service is down. Whether a box can be controlled
+directly on your network is an open question: see
+[docs/local-control-notes.md](docs/local-control-notes.md) for what a box
+exposes locally.
 
 ## Privacy and security
 
