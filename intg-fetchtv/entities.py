@@ -69,6 +69,9 @@ FEATURES = [
 SIMPLE_COMMANDS = {
     "EXIT": fetchtv.KEY_EXIT,
     "TEXT": fetchtv.KEY_TEXT,
+    "GUIDE": fetchtv.KEY_GUIDE,
+    "INFO": fetchtv.KEY_INFO,
+    "HOME": fetchtv.KEY_HOME,
 }
 
 _KEY_COMMANDS = {
