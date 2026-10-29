@@ -111,6 +111,9 @@ run(Cmd.FUNCTION_RED); assert client.sent[-1][2] == "KEY_RED"
 run("EXIT"); assert client.sent[-1][2] == "KEY_EXIT"
 run(Cmd.GUIDE); assert client.sent[-1][2] == "KEY_GUIDE"
 run(Cmd.INFO); assert client.sent[-1][2] == "KEY_INFO"
+# The names they had as simple commands in 0.2.0 still work.
+run("GUIDE"); assert client.sent[-1][2] == "KEY_GUIDE"
+run("INFO"); assert client.sent[-1][2] == "KEY_INFO"
 run(Cmd.DIGIT_7); assert client.sent[-1] == ("keycode", TID, "7")
 assert run(Cmd.SELECT_SOURCE, {"source": "159 beIN SPORTS 3"}) == StatusCodes.OK
 assert client.sent[-1] == ("play", TID, "1850")

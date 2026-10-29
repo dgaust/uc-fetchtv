@@ -105,6 +105,10 @@ _KEY_COMMANDS = {
     Cmd.MENU: fetchtv.KEY_MENU,
     Cmd.GUIDE: fetchtv.KEY_GUIDE,
     Cmd.INFO: fetchtv.KEY_INFO,
+    # Guide and info were first offered as simple commands, and a Remote that
+    # still has them in a UI page or activity sends those names.
+    "GUIDE": fetchtv.KEY_GUIDE,
+    "INFO": fetchtv.KEY_INFO,
     Cmd.FUNCTION_RED: fetchtv.KEY_RED,
     Cmd.FUNCTION_GREEN: fetchtv.KEY_GREEN,
     Cmd.FUNCTION_YELLOW: fetchtv.KEY_YELLOW,
