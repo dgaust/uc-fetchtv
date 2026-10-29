@@ -57,7 +57,7 @@ async def _handle_setup(msg: DriverSetupRequest) -> SetupAction:
         return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
 
     # Drop entities of boxes no longer on the account (e.g. a different account).
-    keep = {ent.entity_id(b.terminal_id) for b in boxes}
+    keep = {f(b.terminal_id) for b in boxes for f in (ent.entity_id, ent.select_entity_id)}
     for entity in list(api.available_entities.get_all()):
         if entity["entity_id"] not in keep:
             api.available_entities.remove(entity["entity_id"])

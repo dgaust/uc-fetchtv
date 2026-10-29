@@ -11,7 +11,8 @@ internet access: FetchTV boxes aren't controlled over the local network.
 
 ## What you get
 
-Every box on your Fetch account appears on the Remote as a media player.
+Every box on your Fetch account appears on the Remote as a media player, plus
+a channel select (see below).
 
 - **What's playing**: the programme title from the Fetch guide (for
   free-to-air *and* subscription channels), the channel name and logo, the
@@ -20,6 +21,12 @@ Every box on your Fetch account appears on the Remote as a media player.
 - **Navigation**: arrows, OK, back, menu, guide, info, exit, the four colour buttons, text.
 - **Channels**: channel up/down, and a channel list to pick from, with your
   visible free-to-air channels and every subscription channel on your plan.
+- **Channel browser**: browse the Remote's media browser for **Free to air**
+  and **Subscription** folders listing every channel with its logo; pick one to
+  tune the box.
+- **Channel select**: each box also has a second entity, "<box name> channel",
+  listing the channels with the current one selected. Use it in dropdowns, UI
+  pages and activities (select a channel, next/previous, first/last).
 - **Record** button.
 
 Not supported (yet): programme posters (Fetch's service only provides channel

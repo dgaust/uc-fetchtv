@@ -28,6 +28,8 @@ from shared import loop as uc_loop  # noqa: E402
 
 LOUNGE_ID = ent.entity_id(LOUNGE)
 BEDROOM_ID = ent.entity_id(BEDROOM)
+LOUNGE_SEL = ent.select_entity_id(LOUNGE)
+BEDROOM_SEL = ent.select_entity_id(BEDROOM)
 
 
 async def main():
@@ -84,18 +86,19 @@ async def main():
         assert e["msg_data"]["error"] == "AUTHORIZATION_ERROR", e
         assert not config.is_configured()
 
-        # Right PIN -> both enabled boxes become media players.
+        # Right PIN -> both enabled boxes become a media player and a channel select.
         await request("setup_driver", {"setup_data": {"activation_code": ACTIVATION_CODE, "pin": PIN}})
         await wait_event(lambda e: e["msg"] == "driver_setup_change" and e["msg_data"].get("state") == "OK")
         resp = await request("get_available_entities")
         found = {x["entity_id"]: x for x in resp["msg_data"]["available_entities"]}
-        assert set(found) == {LOUNGE_ID, BEDROOM_ID}, found
+        assert set(found) == {LOUNGE_ID, BEDROOM_ID, LOUNGE_SEL, BEDROOM_SEL}, found
         assert found[LOUNGE_ID]["name"] == {"en": "Lounge"}
         assert found[LOUNGE_ID]["device_class"] == "set_top_box"
         assert config.is_configured() and len(config.get_boxes()) == 2
 
         # Subscribing pushes live state; the guide programme follows shortly.
-        await request("subscribe_events", {"entity_ids": [LOUNGE_ID, BEDROOM_ID]})
+        await request("subscribe_events",
+                      {"entity_ids": [LOUNGE_ID, BEDROOM_ID, LOUNGE_SEL, BEDROOM_SEL]})
         for _ in range(50):
             s = await states()
             if s.get(LOUNGE_ID, {}).get("media_title") == "Hard Quiz":
@@ -107,6 +110,15 @@ async def main():
         assert lounge["source"] == "23 ABC Entertains"
         assert "159 beIN SPORTS 3" in lounge["source_list"]
         assert s[BEDROOM_ID]["state"] == "OFF", s[BEDROOM_ID]
+        assert s[LOUNGE_SEL]["state"] == "ON" and s[LOUNGE_SEL]["current_option"] == "23 ABC Entertains", s
+        assert "159 beIN SPORTS 3" in s[LOUNGE_SEL]["options"]
+
+        # Browse the channels with logos from the media browser.
+        resp = await request("browse_media", {"entity_id": LOUNGE_ID, "media_id": "subscription",
+                                              "paging": {"page": 1, "limit": 50}})
+        assert resp["code"] == 200, resp
+        item = next(i for i in resp["msg_data"]["media"]["items"] if i["media_id"] == "1850")
+        assert item["title"] == "beIN SPORTS 3" and item["can_play"] and item["thumbnail"], item
 
         # Change channel from the Remote; the new programme comes through.
         resp = await request("entity_command", {"entity_type": "media_player", "entity_id": LOUNGE_ID,

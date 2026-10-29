@@ -180,21 +180,25 @@ async def _refresh_periodically() -> None:
 
 
 def _ensure_entity(terminal_id: str, name: str) -> None:
-    eid = ent.entity_id(terminal_id)
-    if not api.available_entities.contains(eid):
+    if not api.available_entities.contains(ent.entity_id(terminal_id)):
         api.available_entities.add(ent.build_entity(terminal_id, name, get_client))
+    if not api.available_entities.contains(ent.select_entity_id(terminal_id)):
+        api.available_entities.add(ent.build_select(terminal_id, name, get_client))
 
 
 def _push_box(box: fetchtv.Box) -> None:
-    eid = ent.entity_id(box.terminal_id)
+    client = _client
+    now_ms = int(time.time() * 1000)
+    program = client.cached_program(box, now_ms) if client else None
+    _push_entity(ent.entity_id(box.terminal_id), ent.attributes(client, box, program, now_ms))
+    _push_entity(ent.select_entity_id(box.terminal_id), ent.select_attributes(client, box))
+
+
+def _push_entity(eid: str, attrs: dict[str, Any]) -> None:
     # Only subscribed entities live in configured_entities; update_attributes()
     # would just log "not found" for the rest.
     if not api.configured_entities.contains(eid):
         return
-    client = _client
-    now_ms = int(time.time() * 1000)
-    program = client.cached_program(box, now_ms) if client else None
-    attrs = ent.attributes(client, box, program, now_ms)
     comparable = {k: v for k, v in attrs.items() if k not in _MOVING_ATTRS}
     if _last_pushed.get(eid) == comparable:
         return

@@ -7,9 +7,14 @@ import entities as ent
 import fetchtv
 from fetchtv import Box, Channel, Guide, Program
 from ucapi import StatusCodes
+from ucapi.api_definitions import Paging
 from ucapi.media_player import Attributes as Attr
+from ucapi.media_player import BrowseOptions
 from ucapi.media_player import Commands as Cmd
 from ucapi.media_player import States
+from ucapi.select import Attributes as SelAttr
+from ucapi.select import Commands as SelCmd
+from ucapi.select import States as SelStates
 
 TID = "111|aa"
 NOW = 1_800_000_000_000
@@ -130,6 +135,58 @@ run(Cmd.TOGGLE); assert client.sent[-1] == ("key", TID, "KEY_POWER")
 assert run(Cmd.SEEK) == StatusCodes.NOT_IMPLEMENTED
 client.connected = False
 assert run(Cmd.CURSOR_UP) == StatusCodes.SERVICE_UNAVAILABLE
+client.connected = True
+
+
+def run_select(cmd, params=None):
+    return asyncio.run(select.command(cmd, params, websocket=None))
+
+
+# Channel select: options mirror the source list, the current channel is selected.
+sel_attrs = ent.select_attributes(client, make_box())
+assert sel_attrs[SelAttr.STATE] == SelStates.ON
+assert sel_attrs[SelAttr.OPTIONS] == ["2 ABC TV", "23 ABC Entertains", "159 beIN SPORTS 3"]
+assert sel_attrs[SelAttr.CURRENT_OPTION] == "23 ABC Entertains"
+assert ent.select_attributes(client, make_box(standby=True))[SelAttr.CURRENT_OPTION] == ""
+assert ent.select_attributes(client, make_box(online=False)) == {SelAttr.STATE: SelStates.UNAVAILABLE}
+assert ent.select_attributes(None, make_box()) == {SelAttr.STATE: SelStates.UNAVAILABLE}
+
+select = ent.build_select(TID, "Lounge", lambda: client)
+assert select.id == ent.select_entity_id(TID) and ent.terminal_id_from_entity(select.id) == TID
+assert run_select(SelCmd.SELECT_OPTION, {"option": "159 beIN SPORTS 3"}) == StatusCodes.OK
+assert client.sent[-1] == ("play", TID, "1850")
+assert run_select(SelCmd.SELECT_OPTION, {"option": "nope"}) == StatusCodes.BAD_REQUEST
+run_select(SelCmd.SELECT_FIRST); assert client.sent[-1] == ("play", TID, "30018294")
+run_select(SelCmd.SELECT_LAST); assert client.sent[-1] == ("play", TID, "1850")
+box = client.boxes[TID]
+box.channel_id = "30411316"
+run_select(SelCmd.SELECT_NEXT); assert client.sent[-1] == ("play", TID, "1850")
+run_select(SelCmd.SELECT_PREVIOUS); assert client.sent[-1] == ("play", TID, "30018294")
+
+# Media browser: root has the two folders; each lists channels with logos, paged.
+def browse(media_id=None, page=1, limit=10):
+    return asyncio.run(entity.browse(BrowseOptions(media_id=media_id, paging=Paging(page=page, limit=limit))))
+
+
+root = browse()
+assert [i.media_id for i in root.media.items] == ["fta", "subscription"], root
+assert root.media.items[0].subtitle == "2 channels" and root.pagination.count == 2
+fta = browse("fta")
+assert [i.media_id for i in fta.media.items] == ["30018294", "30411316"]
+assert fta.media.items[1].thumbnail == "http://img/abc-ent.png" and fta.media.items[1].can_play
+assert fta.media.items[0].thumbnail == "icon://uc:tv", "no logo -> generic icon"
+sub = browse("subscription")
+assert sub.media.items[0].thumbnail == "http://img/bein3.png" and sub.media.items[0].subtitle == "159"
+paged = browse("fta", page=2, limit=1)
+assert [i.media_id for i in paged.media.items] == ["30411316"] and paged.pagination.count == 2
+assert browse("nope") == StatusCodes.NOT_FOUND
+assert run(Cmd.PLAY_MEDIA, {"media_id": "1850", "media_type": "channel"}) == StatusCodes.OK
+assert client.sent[-1] == ("play", TID, "1850")
+assert run(Cmd.PLAY_MEDIA, {"media_id": "nope"}) == StatusCodes.BAD_REQUEST
+client.connected = False
+assert browse() == StatusCodes.SERVICE_UNAVAILABLE
+client.connected = False
+
 assert asyncio.run(ent.build_entity(TID, "x", lambda: None).command(Cmd.STOP, None, websocket=None)) \
     == StatusCodes.SERVICE_UNAVAILABLE
 

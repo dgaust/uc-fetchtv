@@ -12,6 +12,11 @@ Each box on the account becomes one media player. What it shows:
   and end as position/duration.
 - **source**: the current channel, with every channel the box can play
   (visible free-to-air channels, then subscription channels) as the list.
+- **media browser**: the same channels as two folders (free to air,
+  subscription), each with its logo as the thumbnail; playing one tunes the box.
+
+Each box also gets a **select** entity listing the channels, for dropdowns and
+automations.
 
 Command handlers look up the current client and box at command time (via the
 ``get_client`` callback) rather than closing over them, because entities are
@@ -26,11 +31,17 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from ucapi import StatusCodes
+from ucapi.api_definitions import Pagination
 from ucapi.media_player import Attributes as Attr
+from ucapi.media_player import BrowseMediaItem, BrowseOptions, BrowseResults
 from ucapi.media_player import Commands as Cmd
-from ucapi.media_player import DeviceClasses, MediaPlayer, Options
+from ucapi.media_player import DeviceClasses, MediaClass, MediaPlayer, Options
 from ucapi.media_player import Features as Feat
 from ucapi.media_player import MediaContentType, States
+from ucapi.select import Attributes as SelAttr
+from ucapi.select import Commands as SelCmd
+from ucapi.select import Select
+from ucapi.select import States as SelStates
 
 import fetchtv
 from fetchtv import Box, FetchTvClient, Program
@@ -38,6 +49,10 @@ from fetchtv import Box, FetchTvClient, Program
 _LOG = logging.getLogger(__name__)
 
 _PREFIX = "media_player."
+_SELECT_PREFIX = "select."
+
+# Media browser folders.
+_ROOT, _FREE_TO_AIR, _SUBSCRIPTION = "root", "fta", "subscription"
 
 ClientGetter = Callable[[], "FetchTvClient | None"]
 
@@ -58,6 +73,8 @@ FEATURES = [
     Feat.CHANNEL_SWITCHER,
     Feat.SELECT_SOURCE,
     Feat.RECORD,
+    Feat.BROWSE_MEDIA,
+    Feat.PLAY_MEDIA,
     Feat.MEDIA_TITLE,
     Feat.MEDIA_ARTIST,
     Feat.MEDIA_ALBUM,
@@ -104,9 +121,17 @@ def entity_id(terminal_id: str) -> str:
     return f"{_PREFIX}{terminal_id}"
 
 
+def select_entity_id(terminal_id: str) -> str:
+    """Entity identifier for a box's channel select."""
+    return f"{_SELECT_PREFIX}{terminal_id}"
+
+
 def terminal_id_from_entity(entity_id_: str) -> str | None:
     """The box terminal id an entity id belongs to."""
-    return entity_id_[len(_PREFIX):] if entity_id_.startswith(_PREFIX) else None
+    for prefix in (_PREFIX, _SELECT_PREFIX):
+        if entity_id_.startswith(prefix):
+            return entity_id_[len(prefix):]
+    return None
 
 
 def box_cache_entry(box: Box) -> dict[str, Any]:
@@ -114,17 +139,126 @@ def box_cache_entry(box: Box) -> dict[str, Any]:
     return {"terminal_id": box.terminal_id, "name": box.name}
 
 
+class FetchMediaPlayer(MediaPlayer):
+    """A box's media player, which can also browse the box's channels."""
+
+    def __init__(self, terminal_id: str, name: str, get_client: ClientGetter):
+        super().__init__(
+            entity_id(terminal_id),
+            name,
+            FEATURES,
+            {Attr.STATE: States.UNAVAILABLE},
+            device_class=DeviceClasses.SET_TOP_BOX,
+            options={Options.SIMPLE_COMMANDS: list(SIMPLE_COMMANDS)},
+            cmd_handler=_make_cmd_handler(terminal_id, get_client),
+        )
+        self._terminal_id = terminal_id
+        self._get_client = get_client
+
+    async def browse(self, options: BrowseOptions) -> BrowseResults | StatusCodes:
+        """Browse the box's channels (logos as thumbnails)."""
+        client = self._get_client()
+        box = client.boxes.get(self._terminal_id) if client else None
+        if client is None or box is None or not client.connected:
+            return StatusCodes.SERVICE_UNAVAILABLE
+        return browse_channels(client, box, options)
+
+
 def build_entity(terminal_id: str, name: str, get_client: ClientGetter) -> MediaPlayer:
     """Build the media player for a box. State is filled in once the box reports."""
-    return MediaPlayer(
-        entity_id(terminal_id),
-        name,
-        FEATURES,
-        {Attr.STATE: States.UNAVAILABLE},
-        device_class=DeviceClasses.SET_TOP_BOX,
-        options={Options.SIMPLE_COMMANDS: list(SIMPLE_COMMANDS)},
-        cmd_handler=_make_cmd_handler(terminal_id, get_client),
+    return FetchMediaPlayer(terminal_id, name, get_client)
+
+
+def build_select(terminal_id: str, name: str, get_client: ClientGetter) -> Select:
+    """Build the channel select for a box. Options are filled in once the box reports."""
+    return Select(
+        select_entity_id(terminal_id),
+        f"{name} channel",
+        {SelAttr.STATE: SelStates.UNAVAILABLE, SelAttr.OPTIONS: [], SelAttr.CURRENT_OPTION: ""},
+        icon="uc:tv",
+        cmd_handler=_make_select_handler(terminal_id, get_client),
     )
+
+
+def browse_channels(
+    client: FetchTvClient, box: Box, options: BrowseOptions
+) -> BrowseResults | StatusCodes:
+    """The channel browser: a root with two folders, each listing channels with logos."""
+    channels = client.channels_for(box)
+    free = [c for c in channels if not c.subscription]
+    subscription = [c for c in channels if c.subscription]
+    paging = options.paging
+    start = (paging.page - 1) * paging.limit
+
+    def page_of(items: list[BrowseMediaItem]) -> tuple[list[BrowseMediaItem], Pagination]:
+        chunk = items[start:start + paging.limit]
+        return chunk, Pagination(page=paging.page, limit=len(chunk), count=len(items))
+
+    media_id = options.media_id or _ROOT
+    if media_id == _ROOT:
+        folders = [
+            BrowseMediaItem(
+                media_id=folder_id,
+                title=title,
+                subtitle=f"{len(members)} channels",
+                media_class=MediaClass.DIRECTORY,
+                can_browse=True,
+                thumbnail="icon://uc:tv",
+            )
+            for folder_id, title, members in (
+                (_FREE_TO_AIR, "Free to air", free),
+                (_SUBSCRIPTION, "Subscription", subscription),
+            )
+            if members
+        ]
+        chunk, pagination = page_of(folders)
+        root = BrowseMediaItem(
+            media_id=_ROOT,
+            title=box.name,
+            media_class=MediaClass.DIRECTORY,
+            can_browse=True,
+            items=chunk,
+        )
+        return BrowseResults(media=root, pagination=pagination)
+
+    if media_id in (_FREE_TO_AIR, _SUBSCRIPTION):
+        members = free if media_id == _FREE_TO_AIR else subscription
+        chunk, pagination = page_of([_channel_item(c) for c in members])
+        folder = BrowseMediaItem(
+            media_id=media_id,
+            title="Free to air" if media_id == _FREE_TO_AIR else "Subscription",
+            media_class=MediaClass.DIRECTORY,
+            can_browse=True,
+            items=chunk,
+        )
+        return BrowseResults(media=folder, pagination=pagination)
+
+    return StatusCodes.NOT_FOUND
+
+
+def _channel_item(channel: fetchtv.Channel) -> BrowseMediaItem:
+    return BrowseMediaItem(
+        media_id=channel.id,
+        title=channel.name,
+        subtitle=str(channel.number) if channel.number else None,
+        media_class=MediaClass.CHANNEL,
+        media_type=MediaContentType.CHANNEL,
+        can_play=True,
+        thumbnail=channel.logo or "icon://uc:tv",
+    )
+
+
+def select_attributes(client: FetchTvClient | None, box: Box) -> dict[str, Any]:
+    """Current channel-select attributes for a box."""
+    if client is None or not client.connected or not box.online or not box.has_state:
+        return {SelAttr.STATE: SelStates.UNAVAILABLE}
+    channels = client.channels_for(box)
+    channel = None if box.standby else client.current_channel(box)
+    return {
+        SelAttr.STATE: SelStates.ON,
+        SelAttr.OPTIONS: [c.label for c in channels],
+        SelAttr.CURRENT_OPTION: _source_label(channel, channels),
+    }
 
 
 def attributes(
@@ -206,6 +340,44 @@ def _make_cmd_handler(terminal_id: str, get_client: ClientGetter):
     return _handler
 
 
+def _make_select_handler(terminal_id: str, get_client: ClientGetter):
+    async def _handler(
+        _entity: Select, cmd_id: str, params: dict[str, Any] | None, websocket: Any
+    ) -> StatusCodes:
+        client = get_client()
+        box = client.boxes.get(terminal_id) if client else None
+        if client is None or box is None or not client.connected:
+            return StatusCodes.SERVICE_UNAVAILABLE
+        try:
+            return await _run_select_command(client, box, cmd_id, params or {})
+        except fetchtv.NotConnectedError:
+            return StatusCodes.SERVICE_UNAVAILABLE
+
+    return _handler
+
+
+async def _run_select_command(
+    client: FetchTvClient, box: Box, cmd_id: str, params: dict[str, Any]
+) -> StatusCodes:
+    channels = client.channels_for(box)
+    if not channels:
+        return StatusCodes.SERVICE_UNAVAILABLE
+    if cmd_id == SelCmd.SELECT_OPTION:
+        channel = next((c for c in channels if c.label == params.get("option")), None)
+    elif cmd_id == SelCmd.SELECT_FIRST:
+        channel = channels[0]
+    elif cmd_id == SelCmd.SELECT_LAST:
+        channel = channels[-1]
+    elif cmd_id in (SelCmd.SELECT_NEXT, SelCmd.SELECT_PREVIOUS):
+        channel = next_channel(client, box, 1 if cmd_id == SelCmd.SELECT_NEXT else -1)
+    else:
+        return StatusCodes.NOT_IMPLEMENTED
+    if channel is None:
+        return StatusCodes.BAD_REQUEST
+    await client.play_channel(box.terminal_id, channel.id)
+    return StatusCodes.OK
+
+
 async def _run_command(
     client: FetchTvClient, box: Box, cmd_id: str, params: dict[str, Any]
 ) -> StatusCodes:
@@ -224,6 +396,11 @@ async def _run_command(
     elif cmd_id == Cmd.SELECT_SOURCE:
         source = params.get("source")
         channel = next((c for c in client.channels_for(box) if c.label == source), None)
+        if channel is None:
+            return StatusCodes.BAD_REQUEST
+        await client.play_channel(tid, channel.id)
+    elif cmd_id == Cmd.PLAY_MEDIA:
+        channel = next((c for c in client.channels_for(box) if c.id == str(params.get("media_id"))), None)
         if channel is None:
             return StatusCodes.BAD_REQUEST
         await client.play_channel(tid, channel.id)
