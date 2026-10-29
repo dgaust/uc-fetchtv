@@ -1,0 +1,60 @@
+{
+  "driver_id": "fetchtv",
+  "version": "0.1.0",
+  "min_core_api": "0.20.0",
+  "name": {
+    "en": "FetchTV"
+  },
+  "icon": "uc:integration",
+  "description": {
+    "en": "Control FetchTV set-top boxes and see what's playing, including the programme guide for free-to-air and subscription channels."
+  },
+  "developer": {
+    "name": "dgaust",
+    "url": "https://github.com/dgaust/uc-fetchtv"
+  },
+  "home_page": "https://github.com/dgaust/uc-fetchtv",
+  "setup_data_schema": {
+    "title": {
+      "en": "FetchTV"
+    },
+    "settings": [
+      {
+        "id": "info",
+        "label": {
+          "en": ""
+        },
+        "field": {
+          "label": {
+            "value": {
+              "en": "Enter the activation code and PIN you use to sign in to the Fetch mobile app. You can find the activation code under My Account on fetch.com.au. The Remote needs internet access: FetchTV boxes are controlled through Fetch's own service."
+            }
+          }
+        }
+      },
+      {
+        "id": "activation_code",
+        "label": {
+          "en": "Activation code"
+        },
+        "field": {
+          "text": {
+            "value": ""
+          }
+        }
+      },
+      {
+        "id": "pin",
+        "label": {
+          "en": "PIN"
+        },
+        "field": {
+          "password": {
+            "value": ""
+          }
+        }
+      }
+    ]
+  },
+  "release_date": "2026-10-29"
+}

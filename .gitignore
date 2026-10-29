@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+config.json
+*.egg-info/
+.pytest_cache/
+dist/
+# byproducts of build-intg.sh (PyInstaller + the packed archive)
+artifacts/
+build/
+*.spec
+uc-intg-fetchtv-*.tar.gz
+# local external-driver config volume created by docker-compose (contains the
+# Fetch account (activation code + PIN) + box cache for *your* installation - not part of the repo)
+config/
