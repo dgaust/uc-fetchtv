@@ -45,6 +45,7 @@ from ucapi.select import States as SelStates
 
 import fetchtv
 from fetchtv import Box, FetchTvClient, Program
+from placeholder import CHANNEL_PLACEHOLDER
 
 _LOG = logging.getLogger(__name__)
 
@@ -293,7 +294,7 @@ def attributes(
         Attr.SOURCE: _source_label(channel, channels),
         Attr.MEDIA_TYPE: MediaContentType.CHANNEL if channel else MediaContentType.VIDEO,
         Attr.MEDIA_ARTIST: channel_name if channel_name != box.media_title or program else "",
-        Attr.MEDIA_IMAGE_URL: (channel.logo if channel else None) or "",
+        Attr.MEDIA_IMAGE_URL: (channel.logo if channel else None) or CHANNEL_PLACEHOLDER,
     }
     if program and live:
         attrs[Attr.MEDIA_TITLE] = program.title

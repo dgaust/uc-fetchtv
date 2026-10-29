@@ -5,6 +5,7 @@ import _path  # noqa: F401 - puts intg-fetchtv on sys.path
 
 import entities as ent
 import fetchtv
+from placeholder import CHANNEL_PLACEHOLDER
 from fetchtv import Box, Channel, Guide, Program
 from ucapi import StatusCodes
 from ucapi.api_definitions import Paging
@@ -69,7 +70,8 @@ assert a[Attr.STATE] == States.PLAYING, a
 assert a[Attr.MEDIA_TITLE] == "Hard Quiz"
 assert a[Attr.MEDIA_ARTIST] == "ABC Entertains"
 assert a[Attr.MEDIA_ALBUM] == "Episode 19"
-assert a[Attr.MEDIA_IMAGE_URL] == ""  # no public free-to-air logo
+assert a[Attr.MEDIA_IMAGE_URL] == CHANNEL_PLACEHOLDER  # no public free-to-air logo
+assert CHANNEL_PLACEHOLDER.startswith("data:image/png;base64,iVBOR")
 assert a[Attr.MEDIA_DURATION] == 1800 and a[Attr.MEDIA_POSITION] == 600
 assert a[Attr.SOURCE] == "23 ABC Entertains"
 assert a[Attr.SOURCE_LIST] == ["2 ABC TV", "23 ABC Entertains", "159 beIN SPORTS 3"]
