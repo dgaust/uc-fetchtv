@@ -36,7 +36,7 @@ docker run --rm --platform=linux/arm64/v8 --user root \
     mkdir -p artifacts
     cp -r dist/intg-fetchtv artifacts/bin
     mv artifacts/bin/intg-fetchtv artifacts/bin/driver
-    cp intg-fetchtv/driver.json LICENSE artifacts/
+    cp intg-fetchtv/driver.json LICENSE THIRD_PARTY_NOTICES.md artifacts/
     tar czf "$OUT" -C artifacts .
     # The mount was written as root inside the container - make sure the
     # host user can read the archive and clean up the build directories.

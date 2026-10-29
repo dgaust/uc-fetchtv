@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Application (driver.py, driver.json, fetchtv.py, ...).
 COPY intg-fetchtv/ ./
 
+# Licences travel with the image.
+COPY LICENSE THIRD_PARTY_NOTICES.md /licenses/
+
 # Config (Fetch account + cached box list) is written to UC_CONFIG_HOME - mount a
 # volume there to persist it across container restarts/upgrades.
 ENV UC_CONFIG_HOME=/config
