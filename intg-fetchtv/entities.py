@@ -27,6 +27,7 @@ re-setup creates a new client.
 """
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -166,7 +167,7 @@ class FetchMediaPlayer(MediaPlayer):
         box = client.boxes.get(self._terminal_id) if client else None
         if client is None or box is None or not client.connected:
             return StatusCodes.SERVICE_UNAVAILABLE
-        return browse_channels(client, box, options)
+        return await browse_channels(client, box, options)
 
 
 def build_entity(terminal_id: str, name: str, get_client: ClientGetter) -> MediaPlayer:
@@ -185,10 +186,13 @@ def build_select(terminal_id: str, name: str, get_client: ClientGetter) -> Selec
     )
 
 
-def browse_channels(
+async def browse_channels(
     client: FetchTvClient, box: Box, options: BrowseOptions
 ) -> BrowseResults | StatusCodes:
-    """The channel browser: a root with two folders, each listing channels with logos."""
+    """
+    The channel browser: a root with two folders, each listing channels with
+    their logo and what is on now.
+    """
     channels = client.channels_for(box)
     free = [c for c in channels if not c.subscription]
     subscription = [c for c in channels if c.subscription]
@@ -228,7 +232,11 @@ def browse_channels(
 
     if media_id in (_FREE_TO_AIR, _SUBSCRIPTION):
         members = free if media_id == _FREE_TO_AIR else subscription
-        chunk, pagination = page_of([_channel_item(c) for c in members])
+        shown = members[start:start + paging.limit]
+        await client.refresh_programs(shown)
+        now_ms = int(time.time() * 1000)
+        chunk = [_channel_item(c, client.cached_channel_program(c, now_ms)) for c in shown]
+        pagination = Pagination(page=paging.page, limit=len(chunk), count=len(members))
         folder = BrowseMediaItem(
             media_id=media_id,
             title="Free to air" if media_id == _FREE_TO_AIR else "Subscription",
@@ -241,11 +249,16 @@ def browse_channels(
     return StatusCodes.NOT_FOUND
 
 
-def _channel_item(channel: fetchtv.Channel) -> BrowseMediaItem:
+def _channel_item(channel: fetchtv.Channel, program: Program | None) -> BrowseMediaItem:
+    # What is on now, or the channel number when the guide has nothing.
+    if program and program.title:
+        subtitle = program.title
+    else:
+        subtitle = str(channel.number) if channel.number else None
     return BrowseMediaItem(
         media_id=channel.id,
         title=channel.name,
-        subtitle=str(channel.number) if channel.number else None,
+        subtitle=subtitle,
         media_class=MediaClass.CHANNEL,
         media_type=MediaContentType.CHANNEL,
         can_play=True,

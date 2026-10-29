@@ -1,5 +1,6 @@
 """Mapping of box state to media-player attributes, and Remote commands to box commands."""
 import asyncio
+import time
 
 import _path  # noqa: F401 - puts intg-fetchtv on sys.path
 
@@ -36,6 +37,13 @@ class FakeClient(fetchtv.FetchTvClient):
                        "sources": [{"id": "30411316", "type": "dvb"}],
                        "images": {"channel_logo_focus": {"original": "http://img/abc-ent.png"}}},
         })
+
+        # What is on now, so browsing needs no network. Relative to the real
+        # clock because the browser asks for "now".
+        now = int(time.time() * 1000)
+        for key, title in (("1850", "EFL Cup"), ("411316", "Hard Quiz"), ("18294", "The Drum")):
+            self._guide.set_programs(key, [Program(title=title, start_ms=now - 600_000,
+                                                   end_ms=now + 1_200_000)])
 
     async def send_key(self, terminal_id, key):
         self.sent.append(("key", terminal_id, key))
@@ -181,7 +189,14 @@ assert [i.media_id for i in fta.media.items] == ["30018294", "30411316"]
 assert fta.media.items[1].can_play
 assert fta.media.items[1].thumbnail == "icon://uc:tv", "no public logo -> generic icon"
 sub = browse("subscription")
-assert sub.media.items[0].thumbnail == "https://www.fetchtv.com.au/v2/epg/channels/1850/image" and sub.media.items[0].subtitle == "159"
+assert sub.media.items[0].thumbnail == "https://www.fetchtv.com.au/v2/epg/channels/1850/image"
+# The subtitle is what is on now, not the channel number.
+assert sub.media.items[0].subtitle == "EFL Cup", sub.media.items[0]
+assert [i.subtitle for i in fta.media.items] == ["The Drum", "Hard Quiz"]
+# With nothing in the guide it falls back to the channel number.
+beins = client.channels_for(make_box())[-1]
+assert ent._channel_item(beins, None).subtitle == "159"
+assert ent._channel_item(Channel(id="9", epg_id="9", number=0, name="X"), None).subtitle is None
 paged = browse("fta", page=2, limit=1)
 assert [i.media_id for i in paged.media.items] == ["30411316"] and paged.pagination.count == 2
 assert browse("nope") == StatusCodes.NOT_FOUND

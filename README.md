@@ -22,8 +22,9 @@ a channel select (see below).
 - **Channels**: channel up/down, and a channel list to pick from, with your
   visible free-to-air channels and every subscription channel on your plan.
 - **Channel browser**: browse the Remote's media browser for **Free to air**
-  and **Subscription** folders listing every channel with its logo; pick one to
-  tune the box.
+  and **Subscription** folders listing every channel with its logo and what is
+  on now; pick one to tune the box. Free-to-air channels have no logo (Fetch
+  doesn't publish them), so they show a generic TV image.
 - **Channel select**: each box also has a second entity, "<box name> channel",
   listing the channels with the current one selected. Use it in dropdowns, UI
   pages and activities (select a channel, next/previous, first/last).

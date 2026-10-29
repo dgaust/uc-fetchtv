@@ -68,6 +68,17 @@ async def main():
     assert current.name == "Discovery Turbo", current  # not subscribed, but still named
     assert (await client.refresh_program(bedroom)).title == "Texas Metal"
 
+    # The media browser fetches a whole page of channels in one request, and
+    # skips channels whose listings are already cached (411316 is).
+    page = client.channels_for(lounge)
+    n = len([r for r in fake.http_requests if r[1] == "/v2/epg/programslist"])
+    await client.refresh_programs(page)
+    assert len([r for r in fake.http_requests if r[1] == "/v2/epg/programslist"]) == n + 1
+    assert {c.name: client.cached_channel_program(c).title for c in page} == {
+        "ABC TV": "ABC News", "ABC Entertains": "Hard Quiz", "beIN SPORTS 3": "EFL Cup"}
+    await client.refresh_programs(page)  # everything cached now
+    assert len([r for r in fake.http_requests if r[1] == "/v2/epg/programslist"]) == n + 1
+
     # Changing channel: PLAY_CHANNEL with an int id; the box's NOW_PLAYING
     # updates state, and CHANNEL_CHANGED / PLAYBACK_STOPPED trigger a
     # MEDIA_STATE request instead of being taken as "stopped".

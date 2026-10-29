@@ -543,6 +543,46 @@ class FetchTvClient:
                 guide.set_programs(key, programs)
         return guide.cached_program(channel.epg_id, now)
 
+    def cached_channel_program(self, channel: Channel, at_ms: int | None = None) -> Program | None:
+        """What is on air on a channel, from the cache (no network)."""
+        if self._guide is None:
+            return None
+        return self._guide.cached_program(channel.epg_id, at_ms or _now_ms())
+
+    async def refresh_programs(self, channels: list[Channel]) -> None:
+        """
+        Fetch what is on now for several channels in one request.
+
+        Used by the media browser, so every channel on a page can show its
+        programme. Channels whose cached listings already cover now are skipped.
+        """
+        await self._ensure_guide()
+        guide = self._guide
+        if guide is None:
+            return
+        now = _now_ms()
+        keys = sorted({c.epg_id for c in channels if not guide.has_listings(c.epg_id, now)})
+        if not keys:
+            return
+        try:
+            _, _, body = await asyncio.to_thread(
+                self._http,
+                "GET",
+                "/v2/epg/programslist",
+                params={
+                    "channel_ids": ",".join(keys),
+                    "count": 3,
+                    "extended": 1,
+                    "off_air_catchup": 0,
+                    "include_catchup": 0,
+                },
+            )
+        except (OSError, ValueError) as ex:
+            _LOG.warning("Guide lookup for %d channel(s) failed: %s", len(keys), ex)
+            return
+        for key, programs in parse_programs(body).items():
+            guide.set_programs(key, programs)
+
     # --- internals ------------------------------------------------------------
 
     def _http(
