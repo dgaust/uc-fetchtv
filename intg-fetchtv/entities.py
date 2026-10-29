@@ -52,6 +52,8 @@ FEATURES = [
     Feat.DPAD,
     Feat.NUMPAD,
     Feat.MENU,
+    Feat.GUIDE,
+    Feat.INFO,
     Feat.COLOR_BUTTONS,
     Feat.CHANNEL_SWITCHER,
     Feat.SELECT_SOURCE,
@@ -69,9 +71,6 @@ FEATURES = [
 SIMPLE_COMMANDS = {
     "EXIT": fetchtv.KEY_EXIT,
     "TEXT": fetchtv.KEY_TEXT,
-    "GUIDE": fetchtv.KEY_GUIDE,
-    "INFO": fetchtv.KEY_INFO,
-    "HOME": fetchtv.KEY_HOME,
 }
 
 _KEY_COMMANDS = {
@@ -87,6 +86,8 @@ _KEY_COMMANDS = {
     Cmd.CURSOR_ENTER: fetchtv.KEY_SELECT,
     Cmd.BACK: fetchtv.KEY_BACK,
     Cmd.MENU: fetchtv.KEY_MENU,
+    Cmd.GUIDE: fetchtv.KEY_GUIDE,
+    Cmd.INFO: fetchtv.KEY_INFO,
     Cmd.FUNCTION_RED: fetchtv.KEY_RED,
     Cmd.FUNCTION_GREEN: fetchtv.KEY_GREEN,
     Cmd.FUNCTION_YELLOW: fetchtv.KEY_YELLOW,

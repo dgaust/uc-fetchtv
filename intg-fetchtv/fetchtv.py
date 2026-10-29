@@ -68,9 +68,8 @@ KEY_DOWN = "KEY_DOWN"
 KEY_EXIT = "KEY_EXIT"
 KEY_FAST_FORWARD = "KEY_FAST_FORWARD"
 KEY_GREEN = "KEY_GREEN"
-# Not in pyfetchtv's key list: guessed names, being tried against a real box.
+# Not in pyfetchtv's key list, but the box accepts them (tried on a real box).
 KEY_GUIDE = "KEY_GUIDE"
-KEY_HOME = "KEY_HOME"
 KEY_INFO = "KEY_INFO"
 KEY_LEFT = "KEY_LEFT"
 KEY_MENU = "KEY_MENU"

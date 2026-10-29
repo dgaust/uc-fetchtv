@@ -17,13 +17,13 @@ Every box on your Fetch account appears on the Remote as a media player.
   free-to-air *and* subscription channels), the channel name and logo, the
   episode title, and how far through the programme you are.
 - **On / off** (standby), **play/pause, stop, fast forward, rewind**, mute.
-- **Navigation**: arrows, OK, back, menu, exit, the four colour buttons, text.
+- **Navigation**: arrows, OK, back, menu, guide, info, exit, the four colour buttons, text.
 - **Channels**: channel up/down, and a channel list to pick from, with your
   visible free-to-air channels and every subscription channel on your plan.
 - **Record** button.
 
 Not supported (yet): programme posters (Fetch's service only provides channel
-logos), browsing recordings, the guide/info buttons.
+logos), browsing recordings.
 
 ## What you need
 
