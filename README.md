@@ -29,6 +29,13 @@ a channel select (see below).
 - **Channel select**: each box also has a second entity, "<box name> channel",
   listing the channels with the current one selected. Use it in dropdowns, UI
   pages and activities (select a channel, next/previous, first/last).
+- **Remote**: a third entity per box, "<box name> remote", with every key the box
+  accepts as a command (d-pad, guide, info, text, colours, number pad, channel
+  up/down). It comes with a default layout for the Remote 3: the d-pad, Back,
+  channel rocker, Mute, Menu (guide, hold for menu), Record and the transport
+  row on the buttons; Home and Power are left alone. Two pages cover the rest:
+  Numbers (number pad and Text) and Keys (colours, Info and Exit). Use it in
+  activities and macros, or change the layout in the web configurator.
 - **Record** button.
 
 Not supported (yet): programme posters (Fetch's service only provides channel

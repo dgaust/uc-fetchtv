@@ -21,6 +21,7 @@ import box_manager  # noqa: E402
 import config  # noqa: E402
 import driver  # noqa: E402
 import entities as ent  # noqa: E402
+import remote_entity  # noqa: E402
 import websockets  # noqa: E402
 from fake_fetch import ACTIVATION_CODE, BEDROOM, LOUNGE, PIN, FakeFetch  # noqa: E402
 from shared import api  # noqa: E402
@@ -30,6 +31,8 @@ LOUNGE_ID = ent.entity_id(LOUNGE)
 BEDROOM_ID = ent.entity_id(BEDROOM)
 LOUNGE_SEL = ent.select_entity_id(LOUNGE)
 BEDROOM_SEL = ent.select_entity_id(BEDROOM)
+LOUNGE_REM = remote_entity.entity_id(LOUNGE)
+BEDROOM_REM = remote_entity.entity_id(BEDROOM)
 
 
 async def main():
@@ -91,14 +94,18 @@ async def main():
         await wait_event(lambda e: e["msg"] == "driver_setup_change" and e["msg_data"].get("state") == "OK")
         resp = await request("get_available_entities")
         found = {x["entity_id"]: x for x in resp["msg_data"]["available_entities"]}
-        assert set(found) == {LOUNGE_ID, BEDROOM_ID, LOUNGE_SEL, BEDROOM_SEL}, found
+        assert set(found) == {LOUNGE_ID, BEDROOM_ID, LOUNGE_SEL, BEDROOM_SEL, LOUNGE_REM, BEDROOM_REM}, found
+        assert found[LOUNGE_REM]["name"] == {"en": "Lounge remote"}
+        assert "GUIDE" in found[LOUNGE_REM]["options"]["simple_commands"]
+        assert len(found[LOUNGE_REM]["options"]["user_interface"]["pages"]) == 2
         assert found[LOUNGE_ID]["name"] == {"en": "Lounge"}
         assert found[LOUNGE_ID]["device_class"] == "set_top_box"
         assert config.is_configured() and len(config.get_boxes()) == 2
 
         # Subscribing pushes live state; the guide programme follows shortly.
         await request("subscribe_events",
-                      {"entity_ids": [LOUNGE_ID, BEDROOM_ID, LOUNGE_SEL, BEDROOM_SEL]})
+                      {"entity_ids": [LOUNGE_ID, BEDROOM_ID, LOUNGE_SEL, BEDROOM_SEL,
+                                      LOUNGE_REM, BEDROOM_REM]})
         for _ in range(50):
             s = await states()
             if s.get(LOUNGE_ID, {}).get("media_title") == "Hard Quiz":
@@ -129,6 +136,13 @@ async def main():
                          and e["msg_data"]["entity_id"] == LOUNGE_ID
                          and e["msg_data"]["attributes"].get("media_title") == "EFL Cup")
         assert fake.received("PLAY_CHANNEL", LOUNGE)[-1]["message"]["channelId"] == 1850
+
+        # The remote entity sends the box's keys, including guide.
+        assert s[LOUNGE_REM]["state"] == "ON" and s[BEDROOM_REM]["state"] == "OFF", s
+        resp = await request("entity_command", {"entity_type": "remote", "entity_id": LOUNGE_REM,
+                                                "cmd_id": "send_cmd", "params": {"command": "GUIDE"}})
+        assert resp["code"] == 200, resp
+        assert fake.received("KEYEVENT", LOUNGE)[-1]["message"]["keyName"] == "KEY_GUIDE"
 
         # Power the bedroom box on.
         resp = await request("entity_command", {"entity_type": "media_player", "entity_id": BEDROOM_ID,

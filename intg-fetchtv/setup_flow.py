@@ -24,6 +24,7 @@ import box_manager
 import config
 import entities as ent
 import fetchtv
+import remote_entity
 from shared import api
 
 _LOG = logging.getLogger(__name__)
@@ -57,7 +58,8 @@ async def _handle_setup(msg: DriverSetupRequest) -> SetupAction:
         return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
 
     # Drop entities of boxes no longer on the account (e.g. a different account).
-    keep = {f(b.terminal_id) for b in boxes for f in (ent.entity_id, ent.select_entity_id)}
+    ids = (ent.entity_id, ent.select_entity_id, remote_entity.entity_id)
+    keep = {f(b.terminal_id) for b in boxes for f in ids}
     for entity in list(api.available_entities.get_all()):
         if entity["entity_id"] not in keep:
             api.available_entities.remove(entity["entity_id"])

@@ -23,6 +23,7 @@ from ucapi.media_player import Attributes as Attr
 import config
 import entities as ent
 import fetchtv
+import remote_entity
 from shared import api, loop
 
 _LOG = logging.getLogger(__name__)
@@ -188,6 +189,8 @@ def _ensure_entity(terminal_id: str, name: str) -> None:
         api.available_entities.add(ent.build_entity(terminal_id, name, get_client))
     if not api.available_entities.contains(ent.select_entity_id(terminal_id)):
         api.available_entities.add(ent.build_select(terminal_id, name, get_client))
+    if not api.available_entities.contains(remote_entity.entity_id(terminal_id)):
+        api.available_entities.add(remote_entity.build_remote(terminal_id, name, get_client))
 
 
 def _push_box(box: fetchtv.Box) -> None:
@@ -196,6 +199,7 @@ def _push_box(box: fetchtv.Box) -> None:
     program = client.cached_program(box, now_ms) if client else None
     _push_entity(ent.entity_id(box.terminal_id), ent.attributes(client, box, program, now_ms))
     _push_entity(ent.select_entity_id(box.terminal_id), ent.select_attributes(client, box))
+    _push_entity(remote_entity.entity_id(box.terminal_id), remote_entity.attributes(client, box))
 
 
 def _push_entity(eid: str, attrs: dict[str, Any]) -> None:
