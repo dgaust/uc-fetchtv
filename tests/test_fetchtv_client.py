@@ -79,6 +79,14 @@ async def main():
     await client.refresh_programs(page)  # everything cached now
     assert len([r for r in fake.http_requests if r[1] == "/v2/epg/programslist"]) == n + 1
 
+    # The background prefetch warms every channel in one request, then idles.
+    client._guide._programs.clear()
+    await client.prefetch_programs()
+    assert len([r for r in fake.http_requests if r[1] == "/v2/epg/programslist"]) == n + 2
+    assert all(client.cached_channel_program(c) for c in page)
+    await client.prefetch_programs()
+    assert len([r for r in fake.http_requests if r[1] == "/v2/epg/programslist"]) == n + 2
+
     # Changing channel: PLAY_CHANNEL with an int id; the box's NOW_PLAYING
     # updates state, and CHANNEL_CHANGED / PLAYBACK_STOPPED trigger a
     # MEDIA_STATE request instead of being taken as "stopped".

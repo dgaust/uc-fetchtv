@@ -187,7 +187,7 @@ assert root.media.items[0].subtitle == "2 channels" and root.pagination.count ==
 fta = browse("fta")
 assert [i.media_id for i in fta.media.items] == ["30018294", "30411316"]
 assert fta.media.items[1].can_play
-assert fta.media.items[1].thumbnail == "icon://uc:tv", "no public logo -> generic icon"
+assert fta.media.items[1].thumbnail == CHANNEL_PLACEHOLDER, "no public logo -> placeholder"
 sub = browse("subscription")
 assert sub.media.items[0].thumbnail == "https://www.fetchtv.com.au/v2/epg/channels/1850/image"
 # The subtitle is what is on now, not the channel number.

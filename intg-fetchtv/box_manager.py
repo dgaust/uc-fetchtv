@@ -173,6 +173,10 @@ async def _refresh_periodically() -> None:
         client = _client
         if client is None or not client.connected:
             continue
+        try:
+            await client.prefetch_programs()
+        except Exception:  # noqa: BLE001 - never let a guide hiccup stop the refresh loop
+            _LOG.exception("Guide prefetch failed")
         for box in list(client.boxes.values()):
             if box.has_state and not box.standby:
                 await client.refresh_program(box)

@@ -24,7 +24,8 @@ a channel select (see below).
 - **Channel browser**: browse the Remote's media browser for **Free to air**
   and **Subscription** folders listing every channel with its logo and what is
   on now; pick one to tune the box. Free-to-air channels have no logo (Fetch
-  doesn't publish them), so they show a generic TV image.
+  doesn't publish them), so they show a Material-style TV icon at the same
+  shape as the streaming logos.
 - **Channel select**: each box also has a second entity, "<box name> channel",
   listing the channels with the current one selected. Use it in dropdowns, UI
   pages and activities (select a channel, next/previous, first/last).

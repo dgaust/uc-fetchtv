@@ -60,6 +60,8 @@ RECONNECT_DELAY_S = 10.0
 RECONNECT_DELAY_MAX_S = 300.0
 # Where Fetch's public site serves channel logos.
 PUBLIC_URL = "https://www.fetchtv.com.au"
+# The programme cache is topped up when a listing would run out within this long.
+PREFETCH_MARGIN_MS = 15 * 60 * 1000
 # Guide channel list (names, logos) changes rarely.
 CHANNEL_LIST_MAX_AGE_S = 24 * 3600
 
@@ -549,19 +551,32 @@ class FetchTvClient:
             return None
         return self._guide.cached_program(channel.epg_id, at_ms or _now_ms())
 
-    async def refresh_programs(self, channels: list[Channel]) -> None:
+    async def prefetch_programs(self) -> None:
+        """
+        Keep what is on now cached for every channel any box can play.
+
+        One request covers them all, and only when some listing is about to
+        run out, so the media browser never waits on a lookup.
+        """
+        channels = {c.epg_id: c for box in self.boxes.values() for c in self.channels_for(box)}
+        await self.refresh_programs(list(channels.values()), margin_ms=PREFETCH_MARGIN_MS, count=6)
+
+    async def refresh_programs(
+        self, channels: list[Channel], margin_ms: int = 0, count: int = 3
+    ) -> None:
         """
         Fetch what is on now for several channels in one request.
 
         Used by the media browser, so every channel on a page can show its
-        programme. Channels whose cached listings already cover now are skipped.
+        programme. Channels whose cached listings already cover ``margin_ms``
+        from now are skipped.
         """
         await self._ensure_guide()
         guide = self._guide
         if guide is None:
             return
-        now = _now_ms()
-        keys = sorted({c.epg_id for c in channels if not guide.has_listings(c.epg_id, now)})
+        at = _now_ms() + margin_ms
+        keys = sorted({c.epg_id for c in channels if not guide.has_listings(c.epg_id, at)})
         if not keys:
             return
         try:
@@ -571,7 +586,7 @@ class FetchTvClient:
                 "/v2/epg/programslist",
                 params={
                     "channel_ids": ",".join(keys),
-                    "count": 3,
+                    "count": count,
                     "extended": 1,
                     "off_air_catchup": 0,
                     "include_catchup": 0,

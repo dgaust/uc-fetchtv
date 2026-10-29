@@ -262,7 +262,7 @@ def _channel_item(channel: fetchtv.Channel, program: Program | None) -> BrowseMe
         media_class=MediaClass.CHANNEL,
         media_type=MediaContentType.CHANNEL,
         can_play=True,
-        thumbnail=channel.logo or "icon://uc:tv",
+        thumbnail=channel.logo or CHANNEL_PLACEHOLDER,
     )
 
 
