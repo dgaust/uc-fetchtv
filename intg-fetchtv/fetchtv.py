@@ -860,13 +860,19 @@ class FetchTvClient:
         # several megabytes, so asking once per caller would be a flood.
         waiter = self._alive_waiters.get(box.terminal_id)
         asked_at = self._alive_asked_at.get(box.terminal_id, 0.0)
-        try:
-            if waiter is None or waiter.is_set() or time.monotonic() - asked_at > REPORT_REQUEST_TTL_S:
-                waiter = self._alive_waiters[box.terminal_id] = asyncio.Event()
-                self._alive_asked_at[box.terminal_id] = time.monotonic()
+        if waiter is None or waiter.is_set() or time.monotonic() - asked_at > REPORT_REQUEST_TTL_S:
+            waiter = self._alive_waiters[box.terminal_id] = asyncio.Event()
+            self._alive_asked_at[box.terminal_id] = time.monotonic()
+            try:
                 await self._send(box.terminal_id, "ARE_YOU_ALIVE", queueable=True, paired_only=True)
+            except NotConnectedError:
+                # Nothing is in flight: the next caller must be able to ask.
+                if self._alive_waiters.get(box.terminal_id) is waiter:
+                    del self._alive_waiters[box.terminal_id]
+                return
+        try:
             await asyncio.wait_for(waiter.wait(), timeout_s)
-        except (NotConnectedError, asyncio.TimeoutError):
+        except asyncio.TimeoutError:
             pass
 
     def channels_for(self, box: Box) -> list[Channel]:

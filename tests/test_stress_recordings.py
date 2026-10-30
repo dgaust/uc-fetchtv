@@ -111,6 +111,21 @@ async def main():
     fetchtv.REPORT_REQUEST_TTL_S = saved
     assert reports(fake, LOUNGE) == before + 2 and lounge.recordings_at > 0
 
+    # A request that could not be sent (no connection) leaves nothing "in flight".
+    calls = []
+    real_send = client._send
+
+    async def failing(*args, **kwargs):
+        calls.append(args)
+        raise fetchtv.NotConnectedError("down")
+
+    client._send = failing
+    lounge.recordings_at = 0.0
+    await client.refresh_recordings(lounge)
+    await client.refresh_recordings(lounge)
+    client._send = real_send
+    assert len(calls) == 2, "the second caller was left waiting on a request that was never sent"
+
     # Stopped with a report request pending: it is never sent, nothing is left over.
     fetchtv.RECORDING_REPORT_DELAY_S = 1.0
     before = reports(fake, LOUNGE)
