@@ -1,0 +1,49 @@
+# Troubleshooting and notes
+
+## Troubleshooting
+
+**The Remote can't find the driver** (Docker or Cosmos). The Remote finds it by
+mDNS announcements. When the server has many network interfaces (typical with
+Docker bridges), announcing on all of them can fail with "No buffer space
+available" warnings in the log. Set `UC_INTEGRATION_INTERFACE` to the server's
+LAN IP and recreate the container. Or, when adding the integration on the
+Remote, open the advanced settings and enter the driver's address, for example
+`ws://192.168.1.50:10092`.
+
+**The boxes show as unavailable.** The Remote closes its connection to a driver
+when it sleeps or when you disconnect the integration, and the driver then
+drops its link to Fetch until the Remote reconnects. Wake the Remote or
+reconnect the integration. If that doesn't help, check the driver's log for a
+connection from the Remote.
+
+**A new entity or feature is missing after an update.** See Updating above.
+
+**Changing channel with the box's own IR remote doesn't show straight away.**
+The driver learns of changes from what the box reports to Fetch's service. That
+can lag behind a change made with the box's own remote.
+
+## Does it work locally?
+
+No. The driver never connects to your boxes. It talks to Fetch's servers
+(`apis.fetchtv.com.au` and `messages.fetchtv.com.au`, which are hosted in
+Sydney), the same way the Fetch mobile app does, and Fetch's service relays
+commands to the box. It feels instant because the boxes keep a connection open
+to Fetch and the servers are close: connecting to them takes about 30 ms from
+Australian broadband. It also means the driver needs internet access, and that
+it stops working if Fetch's service is down. Whether a box can be controlled
+directly on your network is an open question: see
+[docs/local-control-notes.md](local-control-notes.md) for what a box
+exposes locally.
+
+## Privacy and security
+
+- Your **activation code and PIN** are saved in `config.json` in the driver's
+  config folder (on the Remote, or the Docker volume) so it can sign in again
+  after a restart. They are stored as plain text, so keep that folder private.
+  They are never written to the logs.
+- The driver contacts **only Fetch**: `apis.fetchtv.com.au` and
+  `messages.fetchtv.com.au` for sign-in, control and the guide. The Remote
+  itself loads channel logos from `www.fetchtv.com.au`. There is no analytics
+  or other third party.
+- The driver's websocket on the Remote's own network has no password, like
+  other Unfolded Circle drivers. Run it only on a network you trust.
