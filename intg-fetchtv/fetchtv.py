@@ -190,6 +190,11 @@ class Box:
     channel_id: str = ""
     media_title: str = ""
     play_state: str = ""
+    # Set while the box plays a recording (playback type PVR).
+    recording_id: str = ""
+    recording_duration_s: int = 0
+    season: str = ""
+    episode: str = ""
     fta_channels: list[Channel] = field(default_factory=list)
     hidden_channel_ids: set[str] = field(default_factory=set)
     recordings: list[Recording] = field(default_factory=list)
@@ -239,6 +244,10 @@ class Box:
         channel_id = media.get("channelId")
         self.channel_id = "" if channel_id is None else str(channel_id)
         self.media_title = str(media.get("mediaTitle") or "")
+        self.recording_id = str(media.get("recordingId") or "")
+        self.recording_duration_s = _to_int(media.get("duration")) // 1000
+        self.season = str(media.get("seasonNumber") or "")
+        self.episode = str(media.get("episodeNumber") or "")
         self.play_state = str(media.get("playBackState") or "")
         if self.play_state == "UNPAUSED":
             self.play_state = PLAY_STATE_PLAYING

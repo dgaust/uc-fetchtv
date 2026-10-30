@@ -336,6 +336,8 @@ def attributes(
     channel = client.current_channel(box)
     channel_name = channel.name if channel else ""
     live = box.play_state == fetchtv.PLAY_STATE_LIVE
+    if box.playback_type == "PVR":
+        return _recording_attributes(box, channel)
 
     attrs: dict[str, Any] = {
         Attr.STATE: _state(box),
@@ -359,6 +361,25 @@ def attributes(
         attrs[Attr.MEDIA_DURATION] = 0
         attrs[Attr.MEDIA_POSITION] = 0
     return attrs
+
+
+def _recording_attributes(box: Box, channel: fetchtv.Channel | None) -> dict[str, Any]:
+    """What a box playing one of its recordings shows (not the channel's live guide)."""
+    recorded = next((r for r in box.recordings if r.id == box.recording_id), None)
+    episode = recorded or fetchtv.Recording(
+        id=box.recording_id, title=box.media_title, season=box.season, episode=box.episode
+    )
+    return {
+        Attr.STATE: _state(box),
+        Attr.SOURCE: "",
+        Attr.MEDIA_TYPE: MediaContentType.EPISODE if episode.episode else MediaContentType.VIDEO,
+        Attr.MEDIA_TITLE: box.media_title,
+        Attr.MEDIA_ARTIST: channel.name if channel else "",
+        Attr.MEDIA_ALBUM: episode.label,
+        Attr.MEDIA_IMAGE_URL: (channel.logo if channel else None) or CHANNEL_PLACEHOLDER,
+        Attr.MEDIA_DURATION: box.recording_duration_s,
+        Attr.MEDIA_POSITION: 0,
+    }
 
 
 def _state(box: Box) -> States:

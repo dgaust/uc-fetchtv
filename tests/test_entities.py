@@ -176,6 +176,21 @@ box.channel_id = "30411316"
 run_select(SelCmd.SELECT_NEXT); assert client.sent[-1] == ("play", TID, "1850")
 run_select(SelCmd.SELECT_PREVIOUS); assert client.sent[-1] == ("play", TID, "30018294")
 
+# Playing a recording shows the recording, not the channel's live guide entry.
+rec_box = make_box()
+rec_box.apply_playback({"playbackType": "PVR", "channelId": "30411316", "recordingId": 55,
+                        "duration": 3_862_000, "seasonNumber": "5", "episodeNumber": "17",
+                        "mediaTitle": "Dirty Jobs", "playBackState": "PLAYING"})
+rec_box.recordings = [fetchtv.Recording(id="55", title="Dirty Jobs", episode_title="Cedar Log Peeler",
+                                        season="5", episode="17")]
+a = ent.attributes(client, rec_box, Program(title="Live Show", start_ms=NOW - 1, end_ms=NOW + 1), NOW)
+assert a[Attr.STATE] == States.PLAYING and a[Attr.MEDIA_TITLE] == "Dirty Jobs", a
+assert a[Attr.MEDIA_ALBUM] == "S5 E17 · Cedar Log Peeler" and a[Attr.MEDIA_DURATION] == 3862, a
+assert a[Attr.SOURCE] == "" and a[Attr.MEDIA_TYPE] == "episode", a
+rec_box.apply_playback({"playbackType": "DVB", "channelId": "30411316", "mediaTitle": "ABC Entertains",
+                        "playBackState": "LIVE"})
+assert rec_box.recording_id == "" and rec_box.recording_duration_s == 0
+
 # Media browser: root has the two folders; each lists channels with logos, paged.
 def browse(media_id=None, page=1, limit=10):
     return asyncio.run(entity.browse(BrowseOptions(media_id=media_id, paging=Paging(page=page, limit=limit))))
