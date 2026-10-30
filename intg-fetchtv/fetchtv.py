@@ -263,22 +263,6 @@ class Box:
             r for r in (_recording(raw) for raw in data.get("recordings") or []) if r
         ]
         self.recordings_at = time.monotonic()
-        if _LOG.isEnabledFor(logging.DEBUG):
-            _LOG.debug("%s: recordings breakdown %s", self.name, _recordings_breakdown(data.get("recordings") or []))
-            for raw in data.get("recordings") or []:
-                if str(raw.get("id")) in ("969981881998843", "969981816334867", "978481670488756500"):
-                    _LOG.debug(
-                        "%s: watched recording %s",
-                        self.name,
-                        {k: v for k, v in raw.items() if k not in ("description", "nameLowered", "episodeTitleLowered")},
-                    )
-            _LOG.debug(
-                "%s: recording signatures %s",
-                self.name,
-                _recordings_signatures(
-                    data.get("recordings") or [], ("969981881998843", "969981816334867", "978481670488756500")
-                ),
-            )
         self.scheduled_count = len(data.get("currentFutureRecordings") or [])
         self.active_recording_ids = [str(i) for i in data.get("activeRecordings") or []]
         self.storage_info = data.get("storageInfo")
@@ -348,48 +332,6 @@ def _fta_channel(raw: dict[str, Any]) -> Channel | None:
         number=_to_int(raw.get("number")),
         name=str(raw.get("name") or raw["id"]),
     )
-
-
-def _recordings_breakdown(raws: list[dict[str, Any]]) -> dict[str, Any]:
-    """Counts that show how the box's recordings differ (for debugging what can be played)."""
-    counts: dict[str, Any] = {"total": len(raws), "owners": {}}
-    for raw in raws:
-        owner = (raw.get("remoteResource") or {}).get("stbId") or "local"
-        counts["owners"][owner] = counts["owners"].get(owner, 0) + 1
-        for key, hit in (
-            ("pendingDelete", bool(raw.get("pendingDelete"))),
-            ("id_over_2^53", isinstance(raw.get("id"), int) and raw["id"] > 2**53),
-            ("hashId_differs", raw.get("hashId") not in (None, raw.get("id"))),
-            ("has_dlnaId", raw.get("dlnaId") not in (None, -1)),
-            ("tiny_or_partial", raw.get("size") != raw.get("dataReceived")),
-        ):
-            if hit:
-                counts[key] = counts.get(key, 0) + 1
-    return counts
-
-
-def _recording_signature(raw: dict[str, Any]) -> tuple:
-    return (
-        "pendingDelete" if raw.get("pendingDelete") else "kept",
-        "dlna" if raw.get("dlnaId") not in (None, -1) else "no-dlna",
-        "complete" if raw.get("size") == raw.get("dataReceived") else "partial",
-        raw.get("sourceType"),
-        raw.get("flags"),
-        "big-id" if isinstance(raw.get("id"), int) and raw["id"] > 2**53 else "",
-    )
-
-
-def _recordings_signatures(raws: list[dict[str, Any]], watch: tuple[str, ...]) -> dict[str, Any]:
-    """Group a box's recordings by their status fields, with the signature of watched ids."""
-    groups: dict[tuple, list[Any]] = {}
-    for raw in raws:
-        groups.setdefault(_recording_signature(raw), []).append(raw.get("id"))
-    return {
-        "groups": {str(k): (len(v), v[0]) for k, v in sorted(groups.items(), key=lambda kv: -len(kv[1]))[:14]},
-        "watch": {
-            w: _recording_signature(raw) for raw in raws for w in watch if str(raw.get("id")) == w
-        },
-    }
 
 
 def _recording(raw: dict[str, Any]) -> Recording | None:
@@ -783,10 +725,13 @@ class FetchTvClient:
         Play one of a box's recordings on it, waking it first if needed.
 
         The message is the one the Fetch Android app sends: ``PLAY_ASSET`` with
-        an asset type and the recording's id, which is a string in the JSON.
+        an asset type and the recording's id. The id has to be a JSON *number*:
+        a box that holds the recording itself (the Mighty) answers "not found
+        locally" to the same id sent as a string, though a box that streams it
+        from another (the Mini) accepts either.
         """
         await self._play(
-            terminal_id, "PLAY_ASSET", {"assetType": "RECORDING", "recordingId": str(recording_id)}
+            terminal_id, "PLAY_ASSET", {"assetType": "RECORDING", "recordingId": int(recording_id)}
         )
 
     async def send_raw(self, terminal_id: str, msg_type: str, extra: dict[str, Any]) -> None:

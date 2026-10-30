@@ -137,11 +137,11 @@ async def main():
     assert lounge.play_state == "LIVE" and lounge.playback_type == "HLS"
     assert (await client.refresh_program(lounge)).title == "EFL Cup"
 
-    # Playing a recording: the Fetch app's PLAY_ASSET message, with the id as a string.
+    # Playing a recording: the Fetch app's PLAY_ASSET message, with the id as a number.
     await client.play_recording(LOUNGE, 11)
     await wait_for(lambda: fake.received("PLAY_ASSET", LOUNGE))
     sent = fake.received("PLAY_ASSET", LOUNGE)[-1]["message"]
-    assert sent["assetType"] == "RECORDING" and sent["recordingId"] == "11", sent
+    assert sent["assetType"] == "RECORDING" and sent["recordingId"] == 11 and isinstance(sent["recordingId"], int), sent
     assert sent["requiresSetTopBox"] is True
 
     # The full report carries the volume, and what the sensors show.
