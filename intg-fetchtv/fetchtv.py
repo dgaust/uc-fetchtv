@@ -263,6 +263,8 @@ class Box:
             r for r in (_recording(raw) for raw in data.get("recordings") or []) if r
         ]
         self.recordings_at = time.monotonic()
+        if _LOG.isEnabledFor(logging.DEBUG):
+            _LOG.debug("%s: recordings breakdown %s", self.name, _recordings_breakdown(data.get("recordings") or []))
         self.scheduled_count = len(data.get("currentFutureRecordings") or [])
         self.active_recording_ids = [str(i) for i in data.get("activeRecordings") or []]
         self.storage_info = data.get("storageInfo")
@@ -332,6 +334,24 @@ def _fta_channel(raw: dict[str, Any]) -> Channel | None:
         number=_to_int(raw.get("number")),
         name=str(raw.get("name") or raw["id"]),
     )
+
+
+def _recordings_breakdown(raws: list[dict[str, Any]]) -> dict[str, Any]:
+    """Counts that show how the box's recordings differ (for debugging what can be played)."""
+    counts: dict[str, Any] = {"total": len(raws), "owners": {}}
+    for raw in raws:
+        owner = (raw.get("remoteResource") or {}).get("stbId") or "local"
+        counts["owners"][owner] = counts["owners"].get(owner, 0) + 1
+        for key, hit in (
+            ("pendingDelete", bool(raw.get("pendingDelete"))),
+            ("id_over_2^53", isinstance(raw.get("id"), int) and raw["id"] > 2**53),
+            ("hashId_differs", raw.get("hashId") not in (None, raw.get("id"))),
+            ("has_dlnaId", raw.get("dlnaId") not in (None, -1)),
+            ("tiny_or_partial", raw.get("size") != raw.get("dataReceived")),
+        ):
+            if hit:
+                counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _recording(raw: dict[str, Any]) -> Recording | None:
