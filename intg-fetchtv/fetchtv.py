@@ -89,6 +89,9 @@ _HTTP_ERRORS = (OSError, ValueError, http.client.HTTPException)
 # Waking a box: how long to wait for it to report it is awake, and how often to ask.
 WAKE_TIMEOUT_S = 20.0
 WAKE_POLL_S = 1.5
+# After a recording starts or ends the box is asked for a fresh full report this
+# long afterwards (events come in bursts), so the sensors and the list follow.
+RECORDING_REPORT_DELAY_S = 3.0
 # Typing text into a box: a cap, and the pause between key codes.
 MAX_TYPED_CHARS = 64
 TYPE_DELAY_S = 0.15
@@ -252,6 +255,8 @@ class Box:
     # Monotonic time of the last full box report, which carries the recordings;
     # 0 when they may be out of date (a recording started or ended).
     recordings_at: float = 0.0
+    # True once the box has sent a full report on this connection.
+    has_report: bool = False
     volume: int | None = None
     muted: bool | None = None
     scheduled_count: int = 0
@@ -272,6 +277,7 @@ class Box:
         self.fta_channels = [c for c in (_fta_channel(raw) for raw in _as_list(data.get("ftaChannels"))) if c]
         self.recordings = [r for r in (_recording(raw) for raw in _as_list(data.get("recordings"))) if r]
         self.recordings_at = time.monotonic()
+        self.has_report = True
         self.scheduled_count = len(_as_list(data.get("currentFutureRecordings")))
         self.active_recording_ids = [str(i) for i in _as_list(data.get("activeRecordings"))]
         self.storage_info = data.get("storageInfo")
@@ -573,6 +579,7 @@ class FetchTvClient:
         self._alive_waiters: dict[str, asyncio.Event] = {}
         self._tasks: set[asyncio.Task] = set()
         self._typing_locks: dict[str, asyncio.Lock] = {}
+        self._report_pending: set[str] = set()
         # Plays waiting for a box in standby to wake, per box, in the order asked.
         self._pending_plays: dict[str, list[tuple[str, dict[str, Any]]]] = {}
         self.connected = False
@@ -1118,6 +1125,7 @@ class FetchTvClient:
         elif msg_type in _RECORDING_EVENTS:
             # The report is the only place the list of recordings comes from.
             box.recordings_at = 0.0
+            self._request_report_soon(box)
             return
         elif msg_type in ("MEDIA_STATE", "NOW_PLAYING"):
             box.apply_media_state(data)
@@ -1139,6 +1147,25 @@ class FetchTvClient:
             _LOG.debug("%s <- %s data: %s", box.name, msg_type, data)
             return
         await self._notify(box)
+
+    def _request_report_soon(self, box: Box) -> None:
+        """Ask the box for its full report shortly, once for a burst of recording events."""
+        if box.terminal_id in self._report_pending or not self._running:
+            return
+        self._report_pending.add(box.terminal_id)
+        task = asyncio.create_task(self._request_report(box.terminal_id))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _request_report(self, terminal_id: str) -> None:
+        try:
+            await asyncio.sleep(RECORDING_REPORT_DELAY_S)
+            self._report_pending.discard(terminal_id)  # events from here on need another request
+            await self._send(terminal_id, "ARE_YOU_ALIVE", queueable=True, paired_only=True)
+        except NotConnectedError:
+            pass
+        finally:
+            self._report_pending.discard(terminal_id)
 
     async def _send(
         self,

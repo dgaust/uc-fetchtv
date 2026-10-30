@@ -17,7 +17,7 @@ box = Box(terminal_id=TID, name="Lounge", online=True, standby=False)
 box.recordings = [fetchtv.Recording(id="1", title="A"), fetchtv.Recording(id="2", title="B")]
 box.scheduled_count = 3
 box.active_recording_ids = ["2"]
-box.recordings_at = 1.0
+box.has_report = True
 box.storage_info = {"freeSize": 227.43, "hdTotalSize": 961.4, "recordingsAllocation": 801}
 
 ids = sensors.entity_ids(TID)
@@ -46,10 +46,17 @@ box.active_recording_ids = []
 assert sensors.attributes(Client(), box)[ids[2]][Attributes.VALUE] == "No"
 
 # Unavailable until the box has sent its report, when offline, or with no connection.
-for broken, client in ((dict(recordings_at=0.0), Client()), (dict(online=False), Client()), ({}, None)):
-    b = Box(terminal_id=TID, name="Lounge", online=True, standby=False, recordings_at=1.0)
+for broken, client in ((dict(has_report=False), Client()), (dict(online=False), Client()), ({}, None)):
+    b = Box(terminal_id=TID, name="Lounge", online=True, standby=False, has_report=True)
     for k, v in broken.items():
         setattr(b, k, v)
     assert all(a[Attributes.STATE] == States.UNAVAILABLE for a in sensors.attributes(client, b).values())
+
+# A recording starting or ending makes the list out of date, but the sensors keep
+# showing the last figures (and are refreshed from the next report) rather than
+# turning unavailable.
+box.recordings_at = 0.0
+stale = sensors.attributes(Client(), box)
+assert stale[ids[0]][Attributes.STATE] == States.ON and stale[ids[2]][Attributes.VALUE] == "No", stale
 
 print("SENSORS_TEST_PASSED")

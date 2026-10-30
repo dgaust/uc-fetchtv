@@ -75,7 +75,7 @@ def build_sensors(terminal_id: str, name: str) -> list[Sensor]:
 
 def attributes(client: FetchTvClient | None, box: Box) -> dict[str, dict[str, Any]]:
     """Current attributes of each of a box's sensors, by entity id."""
-    available = client is not None and client.connected and box.online and box.recordings_at > 0
+    available = client is not None and client.connected and box.online and box.has_report
     result: dict[str, dict[str, Any]] = {}
     for suffix, _label, unit, read in _SENSORS:
         eid = f"{_PREFIX}{box.terminal_id}.{suffix}"
