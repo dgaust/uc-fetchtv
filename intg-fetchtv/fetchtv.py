@@ -265,6 +265,13 @@ class Box:
         self.recordings_at = time.monotonic()
         if _LOG.isEnabledFor(logging.DEBUG):
             _LOG.debug("%s: recordings breakdown %s", self.name, _recordings_breakdown(data.get("recordings") or []))
+            for raw in data.get("recordings") or []:
+                if str(raw.get("id")) in ("969981881998843", "969981816334867", "978481670488756500"):
+                    _LOG.debug(
+                        "%s: watched recording %s",
+                        self.name,
+                        {k: v for k, v in raw.items() if k not in ("description", "nameLowered", "episodeTitleLowered")},
+                    )
             _LOG.debug(
                 "%s: recording signatures %s",
                 self.name,
