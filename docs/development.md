@@ -46,14 +46,6 @@ Android app (3.33.2, version code 6562) sends, found by reading the app itself:
 When the app is updated, bump `APP_VERSION` in `fetchtv.py` to its
 `<version>.<version code>`.
 
-## Unfinished features (hidden)
-
-Off unless `FETCHTV_EXPERIMENTAL=1` is set, so users don't see them:
-
-- The remote entity can send a `PLAY_ASSET` message as a free-text command,
-  `EXPERIMENT PLAY_ASSET {"...": ...}`, for trying out the message when working
-  out the protocol. Nothing else can be sent this way.
-
 ## Releases (automated)
 
 1. Change `"version"` in `intg-fetchtv/driver.json` (say `0.5.0`).

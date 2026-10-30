@@ -28,7 +28,6 @@ as worked out by the pyfetchtv project (https://github.com/jinxo13/pyfetchtv).
 import asyncio
 import json
 import logging
-import os
 import time
 import urllib.error
 import urllib.parse
@@ -65,15 +64,6 @@ def request_headers(device_id: str) -> dict[str, str]:
         "X-FTV-Timeout": REQUEST_TIMEOUT_HEADER,
         "X-FTV-DeviceID": device_id,
     }
-
-def experimental() -> bool:
-    """
-    True when FETCHTV_EXPERIMENTAL=1: turns on features that aren't finished
-    (the Recordings folder, which can list but not play, and the raw
-    ``PLAY_ASSET`` experiments), so users don't see them.
-    """
-    return os.environ.get("FETCHTV_EXPERIMENTAL") == "1"
-
 
 # Messages that mean the list of recordings has changed.
 _RECORDING_EVENTS = frozenset({
@@ -733,11 +723,6 @@ class FetchTvClient:
         await self._play(
             terminal_id, "PLAY_ASSET", {"assetType": "RECORDING", "recordingId": int(recording_id)}
         )
-
-    async def send_raw(self, terminal_id: str, msg_type: str, extra: dict[str, Any]) -> None:
-        """Send an arbitrary message to a box (experiments only: see remote_entity)."""
-        _LOG.info("Experimental message to %s: %s %s", terminal_id, msg_type, extra)
-        await self._send(terminal_id, msg_type, requires_stb=True, extra=extra)
 
     async def request_media_state(self, terminal_id: str) -> None:
         """Ask a box to report what it is playing."""

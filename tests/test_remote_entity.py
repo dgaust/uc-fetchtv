@@ -1,6 +1,5 @@
 """The remote entity: state, power, send_cmd / send_cmd_sequence, and the default layout."""
 import asyncio
-import os
 
 import _path  # noqa: F401 - puts intg-fetchtv on sys.path
 
@@ -35,9 +34,6 @@ class FakeClient(FetchTvClient):
 
     async def type_text(self, terminal_id, text):
         self.sent.append(("type", text))
-
-    async def send_raw(self, terminal_id, msg_type, extra):
-        self.sent.append(("raw", msg_type, extra))
 
     async def play_channel(self, terminal_id, channel_id):
         self.sent.append(("play", channel_id))
@@ -177,23 +173,5 @@ for bad in ("TYPE:", "TYPE:" + "x" * 65, "TYPE:caf\u00e9", "TYPE:tab\there"):
     assert run("send_cmd", {"command": bad}) == StatusCodes.BAD_REQUEST, bad
 assert len(client.sent) == 1
 client.sent.clear()
-
-# Experiments (working out how to play a recording): off unless enabled, and
-# only a play message can be sent this way.
-client.sent.clear()
-exp = 'EXPERIMENT PLAY_ASSET {"assetId": 5}'
-os.environ.pop("FETCHTV_EXPERIMENTAL", None)
-assert run("send_cmd", {"command": exp}) == StatusCodes.BAD_REQUEST and client.sent == []
-os.environ["FETCHTV_EXPERIMENTAL"] = "1"
-assert run("send_cmd", {"command": exp}) == StatusCodes.OK
-assert client.sent == [("raw", "PLAY_ASSET", {"assetId": 5})], client.sent
-assert run("send_cmd", {"command": 'EXPERIMENT GET_RECORDINGS_SUMMARY {"data": {"past": true}}'}) == StatusCodes.OK
-assert client.sent[-1] == ("raw", "GET_RECORDINGS_SUMMARY", {"data": {"past": True}}), client.sent[-1]
-client.sent.pop()
-for bad in ('EXPERIMENT PENDING_DELETE_RECORDINGS_BY_ID {"recordingIds": [1]}',
-            'EXPERIMENT PLAY_ASSET nope', 'EXPERIMENT PLAY_ASSET [1]'):
-    assert run("send_cmd", {"command": bad}) == StatusCodes.BAD_REQUEST, bad
-assert len(client.sent) == 1
-os.environ.pop("FETCHTV_EXPERIMENTAL")
 
 print("REMOTE_ENTITY_TEST_PASSED")
