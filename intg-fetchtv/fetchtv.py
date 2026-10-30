@@ -738,13 +738,18 @@ class FetchTvClient:
         if box is None or box.standby is not True:
             await self._send(terminal_id, msg_type, requires_stb=True, extra=extra)
             return
-        self._pending_plays[terminal_id] = [(msg_type, extra)]
-        task = asyncio.create_task(self._wake_then_send(terminal_id))
+        queue = self._pending_plays[terminal_id] = [(msg_type, extra)]
+        task = asyncio.create_task(self._wake_then_send(terminal_id, queue))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        # (not only in the task's own finally: a task cancelled before it first runs has none)
+        task.add_done_callback(lambda _task: self._forget_plays(terminal_id, queue))
 
-    async def _wake_then_send(self, terminal_id: str) -> None:
-        queue = self._pending_plays[terminal_id]
+    def _forget_plays(self, terminal_id: str, queue: list) -> None:
+        if self._pending_plays.get(terminal_id) is queue:
+            del self._pending_plays[terminal_id]
+
+    async def _wake_then_send(self, terminal_id: str, queue: list[tuple[str, dict[str, Any]]]) -> None:
         try:
             if not await self.wake(terminal_id):
                 _LOG.warning("%s did not wake up in time; sending what is waiting anyway", terminal_id)
@@ -761,7 +766,7 @@ class FetchTvClient:
             _LOG.debug("Not connected: dropped the plays waiting for %s", terminal_id)
         finally:
             # No await between the loop's last look at the queue and this.
-            self._pending_plays.pop(terminal_id, None)
+            self._forget_plays(terminal_id, queue)
 
     async def play_channel(self, terminal_id: str, channel_id: str) -> None:
         """Tune a box to a channel id (as listed in ``channels_for``), waking it first if needed."""

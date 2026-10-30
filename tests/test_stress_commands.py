@@ -187,6 +187,26 @@ async def stopped_while_pending(fake):
     assert not unretrieved, unretrieved
     fake.wakes = True
 
+    # Stopped before the wake task has even started: plays are not held for ever by a dead wake.
+    client, task = await connected_client(fake)
+    fake.boxes[BEDROOM]["standby"] = True
+    await fake.push(BEDROOM, "MEDIA_STATE", {"settings": fake._settings(BEDROOM), "currentPlaybackMedia": fake.boxes[BEDROOM]["media"]})
+    await wait_for(lambda: client.boxes[BEDROOM].standby is True)
+    await client.play_channel(BEDROOM, "1850")  # (no await between this and stop(): the task never runs)
+    await client.stop()
+    await asyncio.wait_for(task, 5)
+    await asyncio.sleep(0.05)
+    assert not client._pending_plays and not client._tasks, client._pending_plays
+    fake.wakes = True
+    task = asyncio.create_task(client.run())
+    await asyncio.wait_for(client.ready.wait(), 5)
+    await wait_for(lambda: client.boxes[BEDROOM].standby is True)
+    fake.ws_received.clear()
+    await client.play_channel(BEDROOM, "2319")
+    await wait_for(lambda: types(fake, BEDROOM, "PLAY_CHANNEL"))
+    await stop(client, task)
+    fake.wakes = False
+
     # Connection lost while typing and while a wake is pending: both end quietly.
     client, task = await connected_client(fake, reconnect_delay=5.0)
     fake.wakes = False
