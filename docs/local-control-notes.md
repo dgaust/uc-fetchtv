@@ -24,8 +24,11 @@ state it reports to Fetch's cloud (`ipAddress`).
 
 ## What this means
 
-- **Recordings**: a local route exists (DLNA on 49152). It could give "browse
-  recordings", which the driver doesn't support yet, with no internet needed.
+- **Recordings**: DLNA on 49152 can list and stream a box's recordings, but it
+  is a media *server* only (a `ContentDirectory` and a `ConnectionManager`, no
+  `AVTransport` or `RenderingControl`), so it can't be told to play one on the
+  box. The driver's recordings list comes from the cloud report instead, and
+  playing a recording on the box still needs Fetch's own message (unknown).
 - **Remote control, state and channel changes**: no documented local interface
   was found. If the Fetch mobile app talks to the box directly when you are on
   the same Wi-Fi, it would be through ports 80, 8060 or 56790, whose requests
