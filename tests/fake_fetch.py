@@ -138,9 +138,11 @@ class FakeFetch:
                 self.end_headers()
                 self.wfile.write(data)
 
-            def _raw(self, status, data: bytes):
+            def _raw(self, status, data: bytes, cookies=()):
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
+                for cookie in cookies:
+                    self.send_header("Set-Cookie", cookie)
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -154,7 +156,9 @@ class FakeFetch:
                 form = parse_qs(self.rfile.read(length).decode())
                 time.sleep(fake.login_delay)
                 if self.path in fake.http_body:
-                    return self._raw(fake.http_status.get(self.path, 200), fake.http_body[self.path])
+                    # (a raw sign-in answer sets the cookie, so only its body is under test)
+                    return self._raw(fake.http_status.get(self.path, 200), fake.http_body[self.path],
+                                     cookies=["auth=secret-token; Path=/"])
                 if fake.http_status.get(self.path):
                     return self._json(fake.http_status[self.path], {})
                 ok = (not fake.reject_login
@@ -194,7 +198,11 @@ class FakeFetch:
                     })
                 self._json(404, {})
 
-        self._http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        class Server(ThreadingHTTPServer):
+            def handle_error(self, request, client_address):
+                pass  # a client that gave up (a timeout test) is not worth a traceback
+
+        self._http = Server(("127.0.0.1", 0), Handler)
         threading.Thread(target=self._http.serve_forever, daemon=True).start()
         self.http_url = f"http://127.0.0.1:{self._http.server_address[1]}"
 

@@ -26,6 +26,7 @@ as worked out by the pyfetchtv project (https://github.com/jinxo13/pyfetchtv).
 """
 
 import asyncio
+import http.client
 import json
 import logging
 import math
@@ -77,6 +78,9 @@ _RECORDING_EVENTS = frozenset({
 })
 
 HTTP_TIMEOUT_S = 20.0
+# What a failed HTTP request can raise: no connection, a timeout, a cut-off or
+# garbled answer.
+_HTTP_ERRORS = (OSError, ValueError, http.client.HTTPException)
 # Waking a box: how long to wait for it to report it is awake, and how often to ask.
 WAKE_TIMEOUT_S = 20.0
 WAKE_POLL_S = 1.5
@@ -556,9 +560,12 @@ class FetchTvClient:
             if ex.code in (401, 403):
                 raise AuthError(f"sign-in rejected ({ex.code})") from ex
             raise FetchTvError(f"sign-in failed: HTTP {ex.code}") from ex
-        except (OSError, ValueError) as ex:
+        except _HTTP_ERRORS as ex:
             raise FetchTvError(f"sign-in failed: {ex}") from ex
-        meta = body.get("__meta__") or {}
+        if not isinstance(body, dict):
+            raise FetchTvError("sign-in failed: unexpected answer from the service")
+        meta = body.get("__meta__")
+        meta = meta if isinstance(meta, dict) else {}
         if meta.get("error"):
             raise AuthError(f"sign-in rejected: {meta.get('error')}: {meta.get('message')}")
         cookies = {}
@@ -570,11 +577,15 @@ class FetchTvClient:
         self._cookies = cookies
         self.auth_failed = False
 
-        for terminal in body.get("terminals") or []:
+        terminals = body.get("terminals")
+        for terminal in terminals if isinstance(terminals, list) else []:
+            if not isinstance(terminal, dict) or terminal.get("id") is None:
+                continue
             if terminal.get("status", "ENABLED") != "ENABLED":
                 continue
             tid = str(terminal["id"])
-            name = terminal.get("friendly_name") or tid
+            name = terminal.get("friendly_name")
+            name = name if isinstance(name, str) and name else tid
             if tid in self.boxes:
                 self.boxes[tid].name = name
             else:
@@ -854,7 +865,7 @@ class FetchTvClient:
                         "include_catchup": 0,
                     },
                 )
-            except (OSError, ValueError) as ex:
+            except _HTTP_ERRORS as ex:
                 _LOG.warning("Guide lookup for %s failed: %s", channel.name, ex)
                 return None
             for key, programs in parse_programs(body).items():
@@ -908,7 +919,7 @@ class FetchTvClient:
                     "include_catchup": 0,
                 },
             )
-        except (OSError, ValueError) as ex:
+        except _HTTP_ERRORS as ex:
             _LOG.warning("Guide lookup for %d channel(s) failed: %s", len(keys), ex)
             return
         for key, programs in parse_programs(body).items():
@@ -942,7 +953,7 @@ class FetchTvClient:
                 return
             try:
                 _, _, body = await asyncio.to_thread(self._http, "GET", "/v2/epg/channels")
-            except (OSError, ValueError) as ex:
+            except _HTTP_ERRORS as ex:
                 _LOG.warning("Could not load the FetchTV channel list: %s", ex)
                 return
             self._guide = Guide(body.get("channels") or {})
