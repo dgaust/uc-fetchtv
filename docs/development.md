@@ -30,6 +30,17 @@ channel browser and select), the remote entity (commands and default layout),
 and the driver end to end over the Remote's websocket API. CI runs them on
 every push.
 
+## Unfinished features (hidden)
+
+Off unless an environment variable is set, so users don't see them:
+
+- `FETCHTV_RECORDINGS=1`: a **Recordings** folder in the media browser. It
+  lists the box's recordings but they can't be played yet: how a box is told to
+  play one isn't known (`PLAY_ASSET` guesses got no reply).
+- `FETCHTV_EXPERIMENTAL=1`: lets the remote entity send a `PLAY_ASSET` message
+  as a free-text command, `EXPERIMENT PLAY_ASSET {"...": ...}`, for working out
+  that format. Nothing else can be sent this way.
+
 ## Releases (automated)
 
 1. Change `"version"` in `intg-fetchtv/driver.json` (say `0.4.0`).

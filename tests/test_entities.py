@@ -1,5 +1,6 @@
 """Mapping of box state to media-player attributes, and Remote commands to box commands."""
 import asyncio
+import os
 import time
 
 import _path  # noqa: F401 - puts intg-fetchtv on sys.path
@@ -220,12 +221,17 @@ assert client.sent[-1] == ("play", TID, "1850")
 assert run(Cmd.PLAY_MEDIA, {"media_id": "nope"}) == StatusCodes.BAD_REQUEST
 
 # Recordings: a third folder, newest first, with episode details and the channel's logo.
+# Hidden unless FETCHTV_RECORDINGS=1.
 assert client.boxes[TID].recordings == []
+os.environ.pop("FETCHTV_RECORDINGS", None)
 client.boxes[TID].recordings = [
     fetchtv.Recording(id="11", title="Hard Quiz", episode_title="Series Finale", season="6",
                       episode="12", channel_id="1850", start_ms=1_799_000_000_000),
     fetchtv.Recording(id="12", title="The Drum", start_ms=1_799_500_000_000),
 ]
+assert [i.media_id for i in browse().media.items] == ["fta", "subscription"], "hidden by default"
+assert browse("recordings") == StatusCodes.NOT_FOUND
+os.environ["FETCHTV_RECORDINGS"] = "1"
 root = browse()
 assert [i.media_id for i in root.media.items] == ["fta", "subscription", "recordings"], root
 assert root.media.items[2].subtitle == "2 recordings"
@@ -241,6 +247,7 @@ assert browse("recordings", page=2, limit=1).media.items[0].title == "Hard Quiz"
 # Recordings can be listed but not played.
 assert run(Cmd.PLAY_MEDIA, {"media_id": "recording:11"}) == StatusCodes.BAD_REQUEST
 client.boxes[TID].recordings = []
+os.environ.pop("FETCHTV_RECORDINGS")
 
 client.connected = False
 assert browse() == StatusCodes.SERVICE_UNAVAILABLE

@@ -73,7 +73,6 @@ Each box is added as three entities.
 | Playback | play/pause, stop, fast forward, rewind, record |
 | Navigation | up, down, left, right, OK, back, menu, guide, info, exit |
 | Channels | channel up/down, number pad, channel list, channel browser (free to air and subscription, with logos and what's on now) |
-| Recordings | the browser also lists the box's recordings, newest first (viewing only: playing one from the Remote isn't supported yet) |
 | Other | mute, text, red, green, yellow, blue |
 | Shows | programme title, channel name and logo, episode, progress |
 

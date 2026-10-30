@@ -14,7 +14,8 @@ Each box on the account becomes one media player. What it shows:
   (visible free-to-air channels, then subscription channels) as the list.
 - **media browser**: the same channels as two folders (free to air,
   subscription), each with its logo as the thumbnail; playing one tunes the box.
-  A third folder lists the box's recordings, newest first (listing only).
+  A third folder lists the box's recordings, newest first (listing only; hidden
+  unless FETCHTV_RECORDINGS=1).
 
 Each box also gets a **select** entity listing the channels, for dropdowns and
 automations.
@@ -28,6 +29,7 @@ re-setup creates a new client.
 """
 
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -55,6 +57,14 @@ _PREFIX = "media_player."
 _SELECT_PREFIX = "select."
 
 # Media browser folders.
+def recordings_enabled() -> bool:
+    """
+    The recordings folder is unfinished (it can list recordings but not play
+    them), so it stays hidden unless FETCHTV_RECORDINGS=1.
+    """
+    return os.environ.get("FETCHTV_RECORDINGS") == "1"
+
+
 _ROOT, _FREE_TO_AIR, _SUBSCRIPTION, _RECORDINGS = "root", "fta", "subscription", "recordings"
 
 ClientGetter = Callable[[], "FetchTvClient | None"]
@@ -219,7 +229,8 @@ async def browse_channels(
             for folder_id, title, members, noun, icon in (
                 (_FREE_TO_AIR, "Free to air", free, "channels", "icon://uc:tv"),
                 (_SUBSCRIPTION, "Subscription", subscription, "channels", "icon://uc:tv"),
-                (_RECORDINGS, "Recordings", box.recordings, "recordings", "icon://uc:tv"),
+                (_RECORDINGS, "Recordings", box.recordings if recordings_enabled() else [],
+                 "recordings", "icon://uc:tv"),
             )
             if members
         ]
@@ -249,7 +260,7 @@ async def browse_channels(
         )
         return BrowseResults(media=folder, pagination=pagination)
 
-    if media_id == _RECORDINGS:
+    if media_id == _RECORDINGS and recordings_enabled():
         await client.refresh_recordings(box)
         # Newest first: what you want to watch is usually what was just recorded.
         recordings = sorted(box.recordings, key=lambda r: (r.start_ms, r.id), reverse=True)
