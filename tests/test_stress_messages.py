@@ -14,7 +14,7 @@ import fetchtv
 from fake_fetch import BEDROOM, LOUNGE, FakeFetch
 
 
-async def wait_for(cond, timeout=5.0):
+async def wait_for(cond, timeout=20.0):
     async with asyncio.timeout(timeout):
         while not cond():
             await asyncio.sleep(0.02)

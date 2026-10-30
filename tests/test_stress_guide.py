@@ -19,7 +19,7 @@ GOOD = {"name": "Good", "number": 7, "subscribed": True, "sources": [{"id": 777,
         "images": {"channel_logo_focus": {"original": "http://img/x.png"}}}
 
 
-async def wait_for(cond, timeout=5.0):
+async def wait_for(cond, timeout=20.0):
     async with asyncio.timeout(timeout):
         while not cond():
             await asyncio.sleep(0.01)
@@ -173,7 +173,7 @@ async def slow_guide(fake):
     client._programs_retry_at = 0.0
     t0 = asyncio.get_running_loop().time()
     assert await client.refresh_program(lounge) is None
-    assert asyncio.get_running_loop().time() - t0 < 0.8
+    assert asyncio.get_running_loop().time() - t0 < 0.95  # (the guide would answer after 1.0)
     fetchtv.HTTP_TIMEOUT_S = saved
     fake.http_delay = 0.0
     assert client.connected

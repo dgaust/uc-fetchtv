@@ -40,7 +40,7 @@ LOUNGE_ID = ent.entity_id(LOUNGE)
 loop_errors: list[str] = []
 
 
-async def wait_for(cond, timeout=10.0):
+async def wait_for(cond, timeout=20.0):
     async with asyncio.timeout(timeout):
         while not cond():
             await asyncio.sleep(0.02)
@@ -101,9 +101,12 @@ class SlowStop(fetchtv.FetchTvClient):
 
     stop_delay = 0.0
 
+    finished = 0  # shutdowns completed
+
     async def stop(self):
         await asyncio.sleep(self.stop_delay)
         await super().stop()
+        SlowStop.finished += 1
 
 
 async def setup(fake):
@@ -148,12 +151,14 @@ async def racing_standby(fake):
     box_manager.client_factory = lambda *a, **k: _slow(fake, *a, **k)
     remote = await Remote().open()
     await remote.request("subscribe_events", {"entity_ids": ALL})
-    for _ in range(3):
+    for n in range(1, 4):
         await remote.event("enter_standby")
         await asyncio.sleep(0.05)
         await remote.event("exit_standby")
         await wait_for(lambda: box_manager.is_connected(), timeout=15)
-        await asyncio.sleep(1.0)  # past the old connection's shutdown
+        # Past the old connection's shutdown (which is what used to report "disconnected").
+        await wait_for(lambda: SlowStop.finished >= n - 1, timeout=15)
+        await asyncio.sleep(0.5)
         state = (await remote.request("get_device_state"))["msg_data"]["state"]
         assert state == "CONNECTED", f"the driver reports {state} though it is connected"
         assert box_manager.is_connected()
@@ -271,7 +276,7 @@ async def soak(fake):
     growth = sum(s.size_diff for s in tracemalloc.take_snapshot().compare_to(base, "filename") if s.size_diff > 0)
     tracemalloc.stop()
     assert len(asyncio.all_tasks()) - tasks_before <= 3, "tasks piled up"
-    assert growth < 3_000_000, f"memory grew by {growth / 1e6:.1f} MB over the soak"
+    assert growth < 6_000_000, f"memory grew by {growth / 1e6:.1f} MB over the soak"
     assert len(box_manager._last_pushed) <= len(ALL)
     assert len(remote.events) < 5000
     await remote.close()

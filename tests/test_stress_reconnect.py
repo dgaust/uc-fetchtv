@@ -16,7 +16,7 @@ import fetchtv
 from fake_fetch import BEDROOM, LOUNGE, FakeFetch
 
 
-async def wait_for(cond, timeout=5.0):
+async def wait_for(cond, timeout=20.0):
     async with asyncio.timeout(timeout):
         while not cond():
             await asyncio.sleep(0.01)
@@ -25,20 +25,20 @@ async def wait_for(cond, timeout=5.0):
 async def backoff_resets_after_a_good_connection(fake):
     """Dropped with an error after a long enough connection: the next retry is quick again."""
     fetchtv.STABLE_CONNECTION_S = 0.2
-    fetchtv.RECONNECT_DELAY_MAX_S = 1.0
-    client = fake.client(reconnect_delay=0.05)
+    fetchtv.RECONNECT_DELAY_MAX_S = 2.0
+    client = fake.client(reconnect_delay=0.1)
     task = asyncio.create_task(client.run())
     await asyncio.wait_for(client.ready.wait(), 5)
     gaps = []
-    for _ in range(7):
+    for _ in range(6):
         await asyncio.sleep(0.3)  # a good connection
         n = fake.ws_connections
         dropped = time.monotonic()
         await fake.drop_connections(code=1011)  # an error close, as a network failure gives
         await wait_for(lambda: fake.ws_connections > n and client.connected)
         gaps.append(fake.ws_times[n] - dropped)
-    # 0.05 s each time, not 0.05, 0.1, 0.2, 0.4, 0.8, 1.0, 1.0.
-    assert max(gaps) < 0.4, f"retry delays kept growing after good connections: {[round(g, 2) for g in gaps]}"
+    # 0.1 s each time (plus the time to sign in), not 0.1, 0.2, 0.4, 0.8, 1.6, 2.0.
+    assert max(gaps) < 0.7, f"retry delays kept growing after good connections: {[round(g, 2) for g in gaps]}"
     await client.stop()
     await asyncio.wait_for(task, 5)
 

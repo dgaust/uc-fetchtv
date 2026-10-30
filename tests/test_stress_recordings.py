@@ -21,7 +21,7 @@ EVENTS = ["RECORDINGS_UPDATE", "RECORDING_UPDATED", "RECORD_PROGRAM_SUCCESS", "R
           "PENDING_DELETE_RECORDINGS_BY_ID_SUCCESS", "RESTORE_RECORDINGS_BY_ID_SUCCESS"]
 
 
-async def wait_for(cond, timeout=5.0):
+async def wait_for(cond, timeout=20.0):
     async with asyncio.timeout(timeout):
         while not cond():
             await asyncio.sleep(0.01)

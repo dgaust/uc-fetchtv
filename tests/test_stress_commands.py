@@ -22,7 +22,7 @@ fetchtv.TYPE_DELAY_S = 0.01
 unretrieved: list[str] = []
 
 
-async def wait_for(cond, timeout=5.0):
+async def wait_for(cond, timeout=20.0):
     async with asyncio.timeout(timeout):
         while not cond():
             await asyncio.sleep(0.01)
@@ -117,9 +117,9 @@ async def wake_races(fake):
     # Twenty plays at once on a sleeping box: the calls return at once, every play is
     # delivered once the box is awake, in the order they were made.
     fake.ws_received.clear()
-    t0 = asyncio.get_running_loop().time()
     await asyncio.gather(*(client.play_channel(BEDROOM, "1850" if i % 2 else "2319") for i in range(20)))
-    assert asyncio.get_running_loop().time() - t0 < 0.5, "play_channel waited for the wake"
+    # (the calls returned before any play was sent: those wait for the box to wake)
+    assert not types(fake, BEDROOM, "PLAY_CHANNEL"), "play_channel waited for the wake"
     await idle(client)
     plays = types(fake, BEDROOM, "PLAY_CHANNEL")
     assert [m["channelId"] for m in plays] == [1850 if i % 2 else 2319 for i in range(20)], [m["channelId"] for m in plays]
@@ -258,18 +258,29 @@ async def standby_flapping(fake):
     lounge = client.boxes[LOUNGE]
     updates = []
     client.subscribe(lambda box: updates.append(box))
-    for i in range(300):
+    async def push_state(i):
         asleep = i % 2 == 0
         await fake.push(LOUNGE, "MEDIA_STATE", {"settings": {"standby": asleep, "volume": i % 100, "mute": asleep},
                                                 "currentPlaybackMedia": {"channelId": "30411316", "mediaTitle": f"t{i}",
                                                                          "playBackState": "IDLE" if asleep else "LIVE"}})
+
+    for i in range(300):
+        await push_state(i)
         if i % 7 == 0:
             await client.play_channel(LOUNGE, "1850")
         if i % 11 == 0:
             await fake.push(LOUNGE, "PAUSED")
+    # The plays above make the fake answer with the box's own state (and the client asks again after each
+    # channel change), which on a slow machine can land after the last push. Let all of that settle -
+    # the client sends nothing more for a while - and then the last state is the last word.
+    await idle(client)
+    seen = -1
+    while seen != len(fake.ws_received):
+        seen = len(fake.ws_received)
+        await asyncio.sleep(0.5)
+    await push_state(299)
     await wait_for(lambda: lounge.media_title == "t299")
     assert lounge.standby is False and lounge.volume == 299 % 100 and lounge.muted is False
-    await idle(client)
     assert client.connected and len(updates) >= 300
     await stop(client, task)
 

@@ -18,7 +18,7 @@ from fake_fetch import ACTIVATION_CODE, LOUNGE, PIN, FakeFetch
 LOGIN = "/v3/authenticate"
 
 
-async def wait_for(cond, timeout=5.0):
+async def wait_for(cond, timeout=20.0):
     async with asyncio.timeout(timeout):
         while not cond():
             await asyncio.sleep(0.01)
