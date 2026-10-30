@@ -91,6 +91,26 @@ async def main():
     assert client.connected and not fresh.has_report
     assert all(a[Attributes.STATE] == States.UNAVAILABLE for a in sensors.attributes(client, fresh).values())
 
+    # Many callers wanting a fresh report at once (the Remote opening several pages)
+    # share one request, and a box that doesn't answer is not asked again by each of them.
+    lounge.recordings_at = 0.0
+    before = reports(fake, LOUNGE)
+    await asyncio.gather(*(client.refresh_recordings(lounge) for _ in range(40)))
+    assert reports(fake, LOUNGE) == before + 1, f"{reports(fake, LOUNGE) - before} report requests for 40 callers"
+    fake.silent.add(LOUNGE)
+    lounge.recordings_at = 0.0
+    before = reports(fake, LOUNGE)
+    t0 = asyncio.get_running_loop().time()
+    await asyncio.gather(*(client.refresh_recordings(lounge, timeout_s=0.4) for _ in range(10)))
+    assert asyncio.get_running_loop().time() - t0 < 1.5 and reports(fake, LOUNGE) == before + 1
+    fake.silent.discard(LOUNGE)
+    saved = fetchtv.REPORT_REQUEST_TTL_S
+    fetchtv.REPORT_REQUEST_TTL_S = 0.1  # an unanswered request is asked again later
+    await asyncio.sleep(0.2)
+    await client.refresh_recordings(lounge)
+    fetchtv.REPORT_REQUEST_TTL_S = saved
+    assert reports(fake, LOUNGE) == before + 2 and lounge.recordings_at > 0
+
     # Stopped with a report request pending: it is never sent, nothing is left over.
     fetchtv.RECORDING_REPORT_DELAY_S = 1.0
     before = reports(fake, LOUNGE)
@@ -99,7 +119,8 @@ async def main():
     await client.stop()
     await asyncio.wait_for(task, 5)
     await asyncio.sleep(1.2)
-    assert reports(fake, LOUNGE) == before and not client._tasks and not client._report_pending
+    assert reports(fake, LOUNGE) == before, (reports(fake, LOUNGE), before)
+    assert not client._tasks and not client._report_pending, (client._tasks, client._report_pending)
     await fake.stop()
     print("STRESS_RECORDINGS_PASSED")
 

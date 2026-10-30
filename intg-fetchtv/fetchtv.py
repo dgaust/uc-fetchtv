@@ -89,6 +89,8 @@ _HTTP_ERRORS = (OSError, ValueError, http.client.HTTPException)
 # Waking a box: how long to wait for it to report it is awake, and how often to ask.
 WAKE_TIMEOUT_S = 20.0
 WAKE_POLL_S = 1.5
+# A request for a box's full report that went unanswered this long is asked again.
+REPORT_REQUEST_TTL_S = 10.0
 # After a recording starts or ends the box is asked for a fresh full report this
 # long afterwards (events come in bursts), so the sensors and the list follow.
 RECORDING_REPORT_DELAY_S = 3.0
@@ -577,6 +579,7 @@ class FetchTvClient:
         self._relogin_at: float | None = None
         self.boxes: dict[str, Box] = {}
         self._alive_waiters: dict[str, asyncio.Event] = {}
+        self._alive_asked_at: dict[str, float] = {}
         self._tasks: set[asyncio.Task] = set()
         self._typing_locks: dict[str, asyncio.Lock] = {}
         self._report_pending: set[str] = set()
@@ -848,10 +851,15 @@ class FetchTvClient:
         fresh = box.recordings_at and time.monotonic() - box.recordings_at < max_age_s
         if fresh or not box.online:
             return
-        waiter = self._alive_waiters.setdefault(box.terminal_id, asyncio.Event())
-        waiter.clear()
+        # Callers asking while a request is out share it: a full report can be
+        # several megabytes, so asking once per caller would be a flood.
+        waiter = self._alive_waiters.get(box.terminal_id)
+        asked_at = self._alive_asked_at.get(box.terminal_id, 0.0)
         try:
-            await self._send(box.terminal_id, "ARE_YOU_ALIVE", queueable=True, paired_only=True)
+            if waiter is None or waiter.is_set() or time.monotonic() - asked_at > REPORT_REQUEST_TTL_S:
+                waiter = self._alive_waiters[box.terminal_id] = asyncio.Event()
+                self._alive_asked_at[box.terminal_id] = time.monotonic()
+                await self._send(box.terminal_id, "ARE_YOU_ALIVE", queueable=True, paired_only=True)
             await asyncio.wait_for(waiter.wait(), timeout_s)
         except (NotConnectedError, asyncio.TimeoutError):
             pass
@@ -1156,6 +1164,8 @@ class FetchTvClient:
         task = asyncio.create_task(self._request_report(box.terminal_id))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        # (not only in the task's own finally: a task cancelled before it first runs has none)
+        task.add_done_callback(lambda _task, tid=box.terminal_id: self._report_pending.discard(tid))
 
     async def _request_report(self, terminal_id: str) -> None:
         try:
