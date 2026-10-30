@@ -106,6 +106,12 @@ THIRD_PARTY_NOTICES.md  licences of what the driver is built with
   Fetch can load. Subscription channels' logos are served by Fetch's public
   site by guide key instead; free-to-air channels have none there, so they get
   an embedded Material-style TV icon at the same shape (266x150) as the logos.
+- Playing a recording is `PLAY_ASSET` with `assetType: "RECORDING"` and the
+  recording's `id`. Send the id as a JSON **number**: a box that holds the
+  recording itself (the Mighty) answers "not found locally" to a string, while
+  a box that streams it from another (the Mini) accepts either. Some ids are
+  larger than 2^53 and arrive rounded in the report; send them as they come,
+  the box rounds the same way.
 - After every channel change a box also sends `PLAYBACK_STOPPED` (the old
   stream stopping). The driver ignores it as a state and asks the box for its
   real state instead.
