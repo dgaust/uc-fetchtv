@@ -135,12 +135,17 @@ async def disconnect() -> None:
     _client = _client_task = _refresh_task = None
     if refresh is not None:
         refresh.cancel()
-    if client is not None:
-        _LOG.info("Disconnecting from FetchTV")
-        await client.stop()
-    if task is not None:
-        task.cancel()
-    await api.set_device_state(ucapi.DeviceStates.DISCONNECTED)
+    try:
+        if client is not None:
+            _LOG.info("Disconnecting from FetchTV")
+            await client.stop()
+    finally:
+        if task is not None:
+            task.cancel()
+    # Closing the old connection can take a while. If a new one was started
+    # meanwhile (the Remote woke straight after sleeping), it is not disconnected.
+    if _client is None:
+        await api.set_device_state(ucapi.DeviceStates.DISCONNECTED)
 
 
 def push_subscribed_state(entity_ids: list[str]) -> None:
