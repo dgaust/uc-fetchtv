@@ -15,7 +15,7 @@ Each box on the account becomes one media player. What it shows:
 - **media browser**: the same channels as two folders (free to air,
   subscription), each with its logo as the thumbnail; playing one tunes the box.
   A third folder lists the box's recordings, newest first; playing one plays it
-  on the box (hidden unless FETCHTV_EXPERIMENTAL=1).
+  on the box.
 
 Each box also gets a **select** entity listing the channels, for dropdowns and
 automations.
@@ -221,7 +221,7 @@ async def browse_channels(
             for folder_id, title, members, noun, icon in (
                 (_FREE_TO_AIR, "Free to air", free, "channels", "icon://uc:tv"),
                 (_SUBSCRIPTION, "Subscription", subscription, "channels", "icon://uc:tv"),
-                (_RECORDINGS, "Recordings", box.recordings if fetchtv.experimental() else [],
+                (_RECORDINGS, "Recordings", box.recordings,
                  "recordings", "icon://uc:tv"),
             )
             if members
@@ -252,7 +252,7 @@ async def browse_channels(
         )
         return BrowseResults(media=folder, pagination=pagination)
 
-    if media_id == _RECORDINGS and fetchtv.experimental():
+    if media_id == _RECORDINGS:
         await client.refresh_recordings(box)
         # Newest first: what you want to watch is usually what was just recorded.
         recordings = sorted(box.recordings, key=lambda r: (r.start_ms, r.id), reverse=True)

@@ -231,17 +231,14 @@ assert client.sent[-1] == ("play", TID, "1850")
 assert run(Cmd.PLAY_MEDIA, {"media_id": "nope"}) == StatusCodes.BAD_REQUEST
 
 # Recordings: a third folder, newest first, with episode details and the channel's logo.
-# Hidden unless FETCHTV_EXPERIMENTAL=1.
+# The folder only appears when the box has recordings.
 assert client.boxes[TID].recordings == []
-os.environ.pop("FETCHTV_EXPERIMENTAL", None)
+assert [i.media_id for i in browse().media.items] == ["fta", "subscription"], "no recordings, no folder"
 client.boxes[TID].recordings = [
     fetchtv.Recording(id="11", title="Hard Quiz", episode_title="Series Finale", season="6",
                       episode="12", channel_id="1850", start_ms=1_799_000_000_000),
     fetchtv.Recording(id="12", title="The Drum", start_ms=1_799_500_000_000),
 ]
-assert [i.media_id for i in browse().media.items] == ["fta", "subscription"], "hidden by default"
-assert browse("recordings") == StatusCodes.NOT_FOUND
-os.environ["FETCHTV_EXPERIMENTAL"] = "1"
 root = browse()
 assert [i.media_id for i in root.media.items] == ["fta", "subscription", "recordings"], root
 assert root.media.items[2].subtitle == "2 recordings"
@@ -259,7 +256,6 @@ assert run(Cmd.PLAY_MEDIA, {"media_id": "recording:11", "media_type": "episode"}
 assert client.sent[-1] == ("recording", TID, "11"), client.sent[-1]
 assert run(Cmd.PLAY_MEDIA, {"media_id": "recording:999"}) == StatusCodes.BAD_REQUEST
 client.boxes[TID].recordings = []
-os.environ.pop("FETCHTV_EXPERIMENTAL")
 
 client.connected = False
 assert browse() == StatusCodes.SERVICE_UNAVAILABLE

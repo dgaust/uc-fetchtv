@@ -34,17 +34,14 @@ every push.
 
 Off unless `FETCHTV_EXPERIMENTAL=1` is set, so users don't see them:
 
-- A **Recordings** folder in the media browser. It lists the box's recordings
-  but they can't be played yet: how a box is told to play one isn't known
-  (`PLAY_ASSET` guesses got no reply).
 - The remote entity can send a `PLAY_ASSET` message as a free-text command,
-  `EXPERIMENT PLAY_ASSET {"...": ...}`, for working out that format. Nothing
-  else can be sent this way.
+  `EXPERIMENT PLAY_ASSET {"...": ...}`, for trying out the message when working
+  out the protocol. Nothing else can be sent this way.
 
 ## Releases (automated)
 
-1. Change `"version"` in `intg-fetchtv/driver.json` (say `0.4.0`).
-2. Commit and push, then tag it: `git tag v0.4.0 && git push origin v0.4.0`
+1. Change `"version"` in `intg-fetchtv/driver.json` (say `0.5.0`).
+2. Commit and push, then tag it: `git tag v0.5.0 && git push origin v0.5.0`
 
 CI then runs the tests, builds the install file for the Remote, and publishes
 a **pre-release (beta)** on GitHub with the file and its checksum. Matching
