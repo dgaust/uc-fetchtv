@@ -292,7 +292,7 @@ async def main():
         except OSError:
             await asyncio.sleep(0.25)
     await setup(fake)
-    for part in (remote_comes_and_goes, racing_standby, many_remotes, soak,):
+    for part in (remote_comes_and_goes, racing_standby, many_remotes, refresh_loop_survives, soak,):
         await part(fake)
     await box_manager.disconnect()
     await fake.stop()

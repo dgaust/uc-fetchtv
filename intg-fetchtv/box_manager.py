@@ -184,12 +184,12 @@ async def _refresh_periodically() -> None:
             continue
         try:
             await client.prefetch_programs()
-        except Exception:  # noqa: BLE001 - never let a guide hiccup stop the refresh loop
-            _LOG.exception("Guide prefetch failed")
-        for box in list(client.boxes.values()):
-            if box.has_state and not box.standby:
-                await client.refresh_program(box)
-            _push_box(box)
+            for box in list(client.boxes.values()):
+                if box.has_state and not box.standby:
+                    await client.refresh_program(box)
+                _push_box(box)
+        except Exception:  # noqa: BLE001 - never let a hiccup stop the refresh loop
+            _LOG.exception("Periodic refresh failed")
 
 
 def _ensure_entity(terminal_id: str, name: str) -> None:
