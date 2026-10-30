@@ -5,9 +5,13 @@ Control your [FetchTV](https://www.fetch.com.au/) boxes from an
 pick channels from a browser with logos, and use every key on a ready-made
 Remote 3 layout.
 
-You sign in with the same activation code and PIN as the Fetch mobile app. The
-Remote needs internet access, as the boxes are controlled through Fetch's
-service.
+You sign in with the same activation code and PIN as the Fetch mobile app.
+
+> **Needs the internet.** The driver never talks to your boxes directly. It
+> controls them through Fetch's online service (`apis.fetchtv.com.au` and
+> `messages.fetchtv.com.au`), the service the Fetch mobile app uses. Your
+> Remote or server needs internet access, and it stops working if Fetch's
+> service is down or your internet is out.
 
 > Unofficial. Not made or endorsed by Fetch, and it may break if Fetch changes
 > their service.
