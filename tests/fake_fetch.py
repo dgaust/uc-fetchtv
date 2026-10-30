@@ -91,6 +91,18 @@ class FakeFetch:
         self.ws_received: list[dict] = []
         self.logins = 0
         self.reject_login = False
+        # Knobs for the stress tests; the defaults behave as before.
+        self.recordings = RECORDINGS
+        self.epg = EPG_CHANNELS
+        self.fta = FTA
+        self.http_status: dict[str, int] = {}   # path -> status to answer with
+        self.http_body: dict[str, bytes] = {}   # path -> raw body to answer with
+        self.http_delay = 0.0                   # seconds each GET takes
+        self.login_delay = 0.0
+        self.expired = False                    # the auth cookie no longer works until the next sign-in
+        self.wakes = True                       # False: a box ignores WAKE_STB
+        self.silent: set[str] = set()           # boxes that answer nothing
+        self.ws_connections = 0
         self.boxes = {
             LOUNGE: {"label": "Lounge", "standby": False,
                      "media": {"playbackType": "DVB", "channelId": "30411316",
@@ -124,6 +136,13 @@ class FakeFetch:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _raw(self, status, data: bytes):
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
             def do_POST(self):
                 fake.http_requests.append(("POST", self.path))
                 fake.http_headers.append(dict(self.headers))
@@ -131,12 +150,18 @@ class FakeFetch:
                     return self._json(404, {})
                 length = int(self.headers.get("Content-Length") or 0)
                 form = parse_qs(self.rfile.read(length).decode())
+                time.sleep(fake.login_delay)
+                if self.path in fake.http_body:
+                    return self._raw(fake.http_status.get(self.path, 200), fake.http_body[self.path])
+                if fake.http_status.get(self.path):
+                    return self._json(fake.http_status[self.path], {})
                 ok = (not fake.reject_login
                       and form.get("activation_code") == [ACTIVATION_CODE]
                       and form.get("pin") == [PIN])
                 if not ok:
                     return self._json(200, {"__meta__": {"error": "ERR_AUTH", "message": "bad pin"}})
                 fake.logins += 1
+                fake.expired = False
                 terminals = [
                     {"id": LOUNGE, "friendly_name": "Lounge", "status": "ENABLED", "type": "Mighty"},
                     {"id": BEDROOM, "friendly_name": "Bedroom", "status": "ENABLED", "type": "Mini"},
@@ -149,10 +174,15 @@ class FakeFetch:
                 url = urlparse(self.path)
                 fake.http_requests.append(("GET", url.path))
                 fake.http_headers.append(dict(self.headers))
-                if "auth=secret-token" not in (self.headers.get("Cookie") or ""):
+                if fake.expired or "auth=secret-token" not in (self.headers.get("Cookie") or ""):
                     return self._json(401, {})
+                time.sleep(fake.http_delay)
+                if url.path in fake.http_body:
+                    return self._raw(fake.http_status.get(url.path, 200), fake.http_body[url.path])
+                if fake.http_status.get(url.path):
+                    return self._json(fake.http_status[url.path], {})
                 if url.path == "/v2/epg/channels":
-                    return self._json(200, {"__meta__": {"error": None}, "channels": EPG_CHANNELS})
+                    return self._json(200, {"__meta__": {"error": None}, "channels": fake.epg})
                 if url.path == "/v2/epg/programslist":
                     ids = parse_qs(url.query).get("channel_ids", [""])[0].split(",")
                     return self._json(200, {
@@ -192,6 +222,11 @@ class FakeFetch:
         return [m for m in self.ws_received
                 if m["message"]["type"] == msg_type and (to is None or m["to"] == to)]
 
+    async def push_raw(self, text: str | bytes) -> None:
+        """Send raw text (or bytes) to every connected client, as is."""
+        for ws in list(self._clients):
+            await ws.send(text)
+
     async def push(self, terminal_id: str, msg_type: str, data: dict | None = None) -> None:
         """Send a message from a box to every connected client."""
         for ws in list(self._clients):
@@ -208,7 +243,8 @@ class FakeFetch:
     async def _ws_handler(self, ws) -> None:
         self.ws_headers.append(dict(ws.request.headers.items()))
         self.ws_paths.append(ws.request.path)
-        if "auth=secret-token" not in ws.request.path:
+        self.ws_connections += 1
+        if self.expired or "auth=secret-token" not in ws.request.path:
             await ws.close(code=4001)
             return
         self._clients.add(ws)
@@ -225,7 +261,7 @@ class FakeFetch:
 
     async def _answer(self, ws, msg: dict) -> None:
         tid = msg["to"]
-        if tid not in self.boxes:
+        if tid not in self.boxes or tid in self.silent:
             return
         box = self.boxes[tid]
         typ = msg["message"]["type"]
@@ -234,8 +270,8 @@ class FakeFetch:
             await ws.send(json.dumps({"sender": tid, "message": {"type": rtype, "data": data}}))
 
         if typ == "ARE_YOU_ALIVE":
-            await reply("I_AM_ALIVE", {**self._settings(tid), "state": box["media"], "ftaChannels": FTA,
-                                       "recordings": RECORDINGS,
+            await reply("I_AM_ALIVE", {**self._settings(tid), "state": box["media"], "ftaChannels": self.fta,
+                                       "recordings": self.recordings,
                                        "currentFutureRecordings": [{"id": 1}, {"id": 2}],
                                        "activeRecordings": [11],
                                        "sysInfo": {"label": box["label"], "hardwareName": "Mighty"}})
@@ -246,8 +282,8 @@ class FakeFetch:
             await reply("PONG", {})
         elif typ == "PLAY_CHANNEL":
             cid = msg["message"]["channelId"]
-            raw = EPG_CHANNELS.get(str(cid))
-            name = raw["name"] if raw else next((c["name"] for c in FTA if c["id"] == str(cid)), "?")
+            raw = self.epg.get(str(cid))
+            name = raw["name"] if raw else next((c["name"] for c in self.fta if c["id"] == str(cid)), "?")
             hls = raw is not None
             box["media"] = {"playbackType": "HLS" if hls else "DVB",
                             "channelId": cid if hls else str(cid),
@@ -255,6 +291,8 @@ class FakeFetch:
             await reply("NOW_PLAYING", {"currentPlaybackMedia": box["media"]})
             await reply("CHANNEL_CHANGED", {})
             await reply("PLAYBACK_STOPPED", {})
+        elif typ == "WAKE_STB" and not self.wakes:
+            return
         elif typ == "WAKE_STB":
             box["standby"] = False
             await reply("MEDIA_STATE", {"settings": self._settings(tid),
