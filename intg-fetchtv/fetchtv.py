@@ -28,6 +28,7 @@ as worked out by the pyfetchtv project (https://github.com/jinxo13/pyfetchtv).
 import asyncio
 import json
 import logging
+import math
 import time
 import urllib.error
 import urllib.parse
@@ -246,15 +247,11 @@ class Box:
         sys_info = data.get("sysInfo") or {}
         self.model = sys_info.get("hardwareName") or self.model
         self._apply_settings(data)
-        self.fta_channels = [
-            c for c in (_fta_channel(raw) for raw in data.get("ftaChannels") or []) if c
-        ]
-        self.recordings = [
-            r for r in (_recording(raw) for raw in data.get("recordings") or []) if r
-        ]
+        self.fta_channels = [c for c in (_fta_channel(raw) for raw in _as_list(data.get("ftaChannels"))) if c]
+        self.recordings = [r for r in (_recording(raw) for raw in _as_list(data.get("recordings"))) if r]
         self.recordings_at = time.monotonic()
-        self.scheduled_count = len(data.get("currentFutureRecordings") or [])
-        self.active_recording_ids = [str(i) for i in data.get("activeRecordings") or []]
+        self.scheduled_count = len(_as_list(data.get("currentFutureRecordings")))
+        self.active_recording_ids = [str(i) for i in _as_list(data.get("activeRecordings"))]
         self.storage_info = data.get("storageInfo")
         _LOG.debug(
             "%s: volume %s mute %s bt %s/%s output %s, storage %s, %d scheduled, active %s",
@@ -303,7 +300,7 @@ class Box:
     def _apply_settings(self, data: dict[str, Any]) -> None:
         if "standby" in data:
             self.standby = bool(data["standby"])
-        if isinstance(data.get("volume"), (int, float)):
+        if _is_number(data.get("volume")):
             self.volume = int(data["volume"])
         if "mute" in data:
             self.muted = bool(data["mute"])
@@ -314,7 +311,7 @@ class Box:
 
 
 def _fta_channel(raw: dict[str, Any]) -> Channel | None:
-    if raw.get("id") is None or raw.get("epg_id") is None:
+    if not isinstance(raw, dict) or raw.get("id") is None or raw.get("epg_id") is None:
         return None
     return Channel(
         id=str(raw["id"]),
@@ -325,8 +322,8 @@ def _fta_channel(raw: dict[str, Any]) -> Channel | None:
 
 
 def _recording(raw: dict[str, Any]) -> Recording | None:
-    """A recording from the box's report; None for deleted or unnamed ones."""
-    if raw.get("id") is None or raw.get("pendingDelete") or not raw.get("name"):
+    """A recording from the box's report; None for deleted, unnamed or malformed ones."""
+    if not isinstance(raw, dict) or raw.get("id") is None or raw.get("pendingDelete") or not raw.get("name"):
         return None
     start = _to_int(raw.get("programStartDate") or raw.get("startDate") or raw.get("creationDate"))
     # Fetch times are epoch milliseconds; tolerate seconds.
@@ -344,10 +341,20 @@ def _recording(raw: dict[str, Any]) -> Recording | None:
     )
 
 
+def _is_number(value: Any) -> bool:
+    """True for a finite int or float (JSON from the service can carry NaN and Infinity)."""
+    return isinstance(value, (int, float)) and math.isfinite(value)
+
+
+def _as_list(value: Any) -> list:
+    """``value`` if it is a list, else an empty one (the service's lists can be null or odd)."""
+    return value if isinstance(value, list) else []
+
+
 def _to_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -925,7 +932,10 @@ class FetchTvClient:
             try:
                 await self._ensure_guide()
                 async for raw in ws:
-                    await self._on_message(raw)
+                    try:
+                        await self._on_message(raw)
+                    except Exception:  # noqa: BLE001 - one odd message must not cost the connection
+                        _LOG.warning("Ignored a message that could not be handled", exc_info=True)
             finally:
                 poller.cancel()
                 self._ws = None
@@ -968,7 +978,7 @@ class FetchTvClient:
             if waiter:
                 waiter.set()
         elif msg_type == "VOLUME_SET":
-            if isinstance(data.get("current"), (int, float)):
+            if _is_number(data.get("current")):
                 box.volume = int(data["current"])
             if "mute" in data:
                 box.muted = bool(data["mute"])
