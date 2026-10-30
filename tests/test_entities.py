@@ -55,6 +55,9 @@ class FakeClient(fetchtv.FetchTvClient):
     async def play_channel(self, terminal_id, channel_id):
         self.sent.append(("play", terminal_id, channel_id))
 
+    async def play_recording(self, terminal_id, recording_id):
+        self.sent.append(("recording", terminal_id, recording_id))
+
 
 def make_box(**kw) -> Box:
     box = Box(terminal_id=TID, name="Lounge", online=True, standby=False)
@@ -188,6 +191,13 @@ a = ent.attributes(client, rec_box, Program(title="Live Show", start_ms=NOW - 1,
 assert a[Attr.STATE] == States.PLAYING and a[Attr.MEDIA_TITLE] == "Dirty Jobs", a
 assert a[Attr.MEDIA_ALBUM] == "S5 E17 · Cedar Log Peeler" and a[Attr.MEDIA_DURATION] == 3862, a
 assert a[Attr.SOURCE] == "" and a[Attr.MEDIA_TYPE] == "episode", a
+# A box playing another box's recording reports it differently, with no duration.
+rec_box.apply_playback({"playbackType": "ENCRYPTED_VOD_STREAM", "baseType": "MULTIROOM_PVR",
+                        "channelId": "30411316", "recordingId": 55, "mediaTitle": "Dirty Jobs",
+                        "playBackState": "PLAYING"})
+rec_box.recordings[0].start_ms, rec_box.recordings[0].end_ms = 1_000_000, 3_700_000
+a = ent.attributes(client, rec_box, None, NOW)
+assert a[Attr.MEDIA_TITLE] == "Dirty Jobs" and a[Attr.MEDIA_DURATION] == 2700 and a[Attr.SOURCE] == "", a
 rec_box.apply_playback({"playbackType": "DVB", "channelId": "30411316", "mediaTitle": "ABC Entertains",
                         "playBackState": "LIVE"})
 assert rec_box.recording_id == "" and rec_box.recording_duration_s == 0
@@ -239,13 +249,15 @@ recs = browse("recordings")
 assert [i.title for i in recs.media.items] == ["The Drum", "Hard Quiz"], recs
 assert recs.pagination.count == 2
 quiz = recs.media.items[1]
-assert quiz.media_id == "recording:11" and not quiz.can_play
+assert quiz.media_id == "recording:11" and quiz.can_play
 assert quiz.subtitle.startswith("S6 E12 · Series Finale"), quiz.subtitle
 assert quiz.thumbnail == "https://www.fetchtv.com.au/v2/epg/channels/1850/image"
 assert recs.media.items[0].thumbnail == CHANNEL_PLACEHOLDER
 assert browse("recordings", page=2, limit=1).media.items[0].title == "Hard Quiz"
-# Recordings can be listed but not played.
-assert run(Cmd.PLAY_MEDIA, {"media_id": "recording:11"}) == StatusCodes.BAD_REQUEST
+# Playing a recording asks the box to play it; ids it doesn't have are refused.
+assert run(Cmd.PLAY_MEDIA, {"media_id": "recording:11", "media_type": "episode"}) == StatusCodes.OK
+assert client.sent[-1] == ("recording", TID, "11"), client.sent[-1]
+assert run(Cmd.PLAY_MEDIA, {"media_id": "recording:999"}) == StatusCodes.BAD_REQUEST
 client.boxes[TID].recordings = []
 os.environ.pop("FETCHTV_EXPERIMENTAL")
 

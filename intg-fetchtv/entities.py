@@ -14,8 +14,8 @@ Each box on the account becomes one media player. What it shows:
   (visible free-to-air channels, then subscription channels) as the list.
 - **media browser**: the same channels as two folders (free to air,
   subscription), each with its logo as the thumbnail; playing one tunes the box.
-  A third folder lists the box's recordings, newest first (listing only; hidden
-  unless FETCHTV_EXPERIMENTAL=1).
+  A third folder lists the box's recordings, newest first; playing one plays it
+  on the box (hidden unless FETCHTV_EXPERIMENTAL=1).
 
 Each box also gets a **select** entity listing the channels, for dropdowns and
 automations.
@@ -57,6 +57,7 @@ _SELECT_PREFIX = "select."
 
 # Media browser folders.
 _ROOT, _FREE_TO_AIR, _SUBSCRIPTION, _RECORDINGS = "root", "fta", "subscription", "recordings"
+_RECORDING_PREFIX = "recording:"
 
 ClientGetter = Callable[[], "FetchTvClient | None"]
 
@@ -272,17 +273,18 @@ async def browse_channels(
 
 
 def _recording_item(recording: fetchtv.Recording, logo: str | None) -> BrowseMediaItem:
-    """A recording as a list entry. Listed only: the box can't be told to play one yet."""
+    """A recording as a list entry; playing it tells the box to play it."""
     when = ""
     if recording.start_ms:
         when = datetime.fromtimestamp(recording.start_ms / 1000, timezone.utc).astimezone().strftime("%a %d %b")
     subtitle = " · ".join(part for part in (recording.label, when) if part) or None
     return BrowseMediaItem(
-        media_id=f"recording:{recording.id}",
+        media_id=f"{_RECORDING_PREFIX}{recording.id}",
         title=recording.title,
         subtitle=subtitle,
         media_class=MediaClass.EPISODE if recording.episode else MediaClass.VIDEO,
         media_type=MediaContentType.EPISODE if recording.episode else MediaContentType.VIDEO,
+        can_play=True,
         thumbnail=logo or CHANNEL_PLACEHOLDER,
     )
 
@@ -338,7 +340,7 @@ def attributes(
     channel = client.current_channel(box)
     channel_name = channel.name if channel else ""
     live = box.play_state == fetchtv.PLAY_STATE_LIVE
-    if box.playback_type == "PVR":
+    if box.recording_id:
         return _recording_attributes(box, channel)
 
     attrs: dict[str, Any] = {
@@ -379,7 +381,7 @@ def _recording_attributes(box: Box, channel: fetchtv.Channel | None) -> dict[str
         Attr.MEDIA_ARTIST: channel.name if channel else "",
         Attr.MEDIA_ALBUM: episode.label,
         Attr.MEDIA_IMAGE_URL: (channel.logo if channel else None) or CHANNEL_PLACEHOLDER,
-        Attr.MEDIA_DURATION: box.recording_duration_s,
+        Attr.MEDIA_DURATION: box.recording_duration_s or (recorded.duration_s if recorded else 0),
         Attr.MEDIA_POSITION: 0,
     }
 
@@ -476,6 +478,11 @@ async def _run_command(
         if channel is None:
             return StatusCodes.BAD_REQUEST
         await client.play_channel(tid, channel.id)
+    elif cmd_id == Cmd.PLAY_MEDIA and str(params.get("media_id", "")).startswith(_RECORDING_PREFIX):
+        recording_id = str(params["media_id"])[len(_RECORDING_PREFIX):]
+        if not any(r.id == recording_id for r in box.recordings):
+            return StatusCodes.BAD_REQUEST
+        await client.play_recording(tid, recording_id)
     elif cmd_id == Cmd.PLAY_MEDIA:
         channel = next((c for c in client.channels_for(box) if c.id == str(params.get("media_id"))), None)
         if channel is None:

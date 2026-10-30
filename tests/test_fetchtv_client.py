@@ -117,6 +117,13 @@ async def main():
     assert lounge.play_state == "LIVE" and lounge.playback_type == "HLS"
     assert (await client.refresh_program(lounge)).title == "EFL Cup"
 
+    # Playing a recording: the Fetch app's PLAY_ASSET message, with the id as a string.
+    await client.play_recording(LOUNGE, 11)
+    await wait_for(lambda: fake.received("PLAY_ASSET", LOUNGE))
+    sent = fake.received("PLAY_ASSET", LOUNGE)[-1]["message"]
+    assert sent["assetType"] == "RECORDING" and sent["recordingId"] == "11", sent
+    assert sent["requiresSetTopBox"] is True
+
     # Remote keys go out as KEYEVENT with the key name.
     await client.send_key(LOUNGE, fetchtv.KEY_UP)
     await wait_for(lambda: fake.received("KEYEVENT", LOUNGE))

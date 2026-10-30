@@ -175,7 +175,12 @@ class Recording:
     channel_id: str = ""
     synopsis: str = ""
     start_ms: int = 0
+    end_ms: int = 0
     series_id: str = ""
+
+    @property
+    def duration_s(self) -> int:
+        return max(0, (self.end_ms - self.start_ms) // 1000)
 
     @property
     def label(self) -> str:
@@ -200,7 +205,8 @@ class Box:
     channel_id: str = ""
     media_title: str = ""
     play_state: str = ""
-    # Set while the box plays a recording (playback type PVR).
+    # Set while the box plays a recording: playback type PVR on the box that
+    # recorded it, ENCRYPTED_VOD_STREAM (base type MULTIROOM_PVR) on another box.
     recording_id: str = ""
     recording_duration_s: int = 0
     season: str = ""
@@ -297,6 +303,7 @@ def _recording(raw: dict[str, Any]) -> Recording | None:
         channel_id=str(raw.get("channelId") or ""),
         synopsis=str(raw.get("description") or ""),
         start_ms=start * 1000 if 0 < start < 10**11 else start,
+        end_ms=_to_int(raw.get("programEndDate") or raw.get("endDate")),
         series_id=str(raw.get("seriesLinkId") or ""),
     )
 
@@ -561,6 +568,20 @@ class FetchTvClient:
         """Tune a box to a channel id (as listed in ``channels_for``)."""
         await self._send(
             terminal_id, "PLAY_CHANNEL", requires_stb=True, extra={"channelId": int(channel_id)}
+        )
+
+    async def play_recording(self, terminal_id: str, recording_id: str) -> None:
+        """
+        Play one of a box's recordings on it.
+
+        The message is the one the Fetch Android app sends: ``PLAY_ASSET`` with
+        an asset type and the recording's id, which is a string in the JSON.
+        """
+        await self._send(
+            terminal_id,
+            "PLAY_ASSET",
+            requires_stb=True,
+            extra={"assetType": "RECORDING", "recordingId": str(recording_id)},
         )
 
     async def send_raw(self, terminal_id: str, msg_type: str, extra: dict[str, Any]) -> None:

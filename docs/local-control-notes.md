@@ -34,6 +34,23 @@ state it reports to Fetch's cloud (`ipAddress`).
   the same Wi-Fi, it would be through ports 80, 8060 or 56790, whose requests
   and any authentication are unknown.
 
+## What the Fetch Android app does (3.33.2)
+
+Looking at the app itself (its decompiled code), rather than guessing:
+
+- **Every command goes through Fetch's websocket** (`WebSocketManager`):
+  remote keys, change channel, play a recording, wake, ping. There is no other
+  command path, no use of the box's ports 8060 or 56790, and no SSDP, mDNS or
+  UPnP discovery. **Control is cloud-only; there is no local option.**
+- **The only direct traffic to a box on your network is media**: when the phone
+  is on the same network as the box, it streams or downloads a recording from
+  `http://<box ip>/download/<disk id>/master.m3u8` (HLS recordings, port 80) or
+  `http://<box ip>:<dlna port>/web/<disk id>` (DLNA). That is likely what the
+  box's port 80 is for.
+- Playing a recording on a box is the websocket message `PLAY_ASSET` with
+  `assetType: "RECORDING"` and `recordingId` (a string). The same message with
+  `assetType: "CHANNEL"` plays a channel.
+
 ## How to find out more
 
 The reliable way is to watch what the Fetch mobile app does:
