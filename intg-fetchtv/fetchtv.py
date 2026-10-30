@@ -234,6 +234,7 @@ class Box:
         """Update the playing media from a ``currentPlaybackMedia`` dict."""
         if not media:
             return
+        _LOG.debug("%s: playing %s", self.name, media)
         self.playback_type = str(media.get("playbackType") or "")
         channel_id = media.get("channelId")
         self.channel_id = "" if channel_id is None else str(channel_id)
