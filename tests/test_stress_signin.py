@@ -208,6 +208,7 @@ async def main():
     try:
         await odd_answers(fake)
         await retries(fake)
+        await secrets_stay_out_of_logs(fake)
     finally:
         fetchtv.RECONNECT_DELAY_MAX_S, fetchtv.HTTP_TIMEOUT_S = saved
     await fake.stop()

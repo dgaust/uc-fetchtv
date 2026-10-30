@@ -40,6 +40,11 @@ from typing import Any, Awaitable, Callable
 import websockets
 
 _LOG = logging.getLogger(__name__)
+# The websockets library logs the request line, which carries the auth cookie in
+# its query, at DEBUG. Give it a logger of its own that stays at WARNING however
+# the rest of the logging is set up.
+_WS_LOG = logging.getLogger("fetchtv.websocket")
+_WS_LOG.setLevel(logging.WARNING)
 
 API_BASE = "https://apis.fetchtv.com.au"
 WS_URL = "wss://messages.fetchtv.com.au/v2/message/ws/messages"
@@ -976,6 +981,7 @@ class FetchTvClient:
             open_timeout=WS_OPEN_TIMEOUT_S,
             ping_interval=30,
             max_size=WS_MAX_MESSAGE_BYTES,
+            logger=_WS_LOG,
         ) as ws:
             if not self._running:  # stop() came while the connection was being opened
                 return
