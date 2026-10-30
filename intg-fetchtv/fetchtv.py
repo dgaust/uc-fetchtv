@@ -559,8 +559,10 @@ class FetchTvClient:
         poll_interval: float = POLL_INTERVAL_S,
         reconnect_delay: float = RECONNECT_DELAY_S,
         device_id: str = DEFAULT_DEVICE_ID,
+        drm_id: str = "",
     ):
         self._device_id = device_id
+        self._drm_id = drm_id
         self._activation_code = activation_code
         self._pin = pin
         self._api_base = api_base.rstrip("/")
@@ -977,6 +979,8 @@ class FetchTvClient:
         # Connected the way the app does: the auth cookie in the URL, the
         # capabilities and device id as headers, and no User-Agent.
         url = f"{self._ws_url}?auth={urllib.parse.quote(self._cookies['auth'], safe='')}"
+        if self._drm_id:
+            url += f"&verimatrix_id={urllib.parse.quote(self._drm_id, safe='')}"
         headers = request_headers(self._device_id)
         async with websockets.connect(
             url,

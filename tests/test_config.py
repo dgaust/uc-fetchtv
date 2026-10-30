@@ -21,9 +21,16 @@ config.init(folder)
 assert config.get_device_id() == device_id
 assert config.get_credentials() == ("code", "1234") and config.get_boxes()[0]["name"] == "Lounge"
 
+# The DRM id is a UUID, made once and kept.
+import uuid  # noqa: E402
+drm_id = config.get_drm_id()
+assert str(uuid.UUID(drm_id)) == drm_id
+config.init(folder)
+assert config.get_drm_id() == drm_id and config.get_device_id() == device_id
+
 # A separate install gets its own.
 other = tempfile.mkdtemp()
 config.init(other)
-assert config.get_device_id() != device_id
+assert config.get_device_id() != device_id and config.get_drm_id() != drm_id
 
 print("CONFIG_TEST_PASSED")

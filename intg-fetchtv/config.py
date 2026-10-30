@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import secrets
+import uuid
 
 _LOG = logging.getLogger(__name__)
 
@@ -26,15 +27,17 @@ _activation_code: str | None = None
 _pin: str | None = None
 _boxes: list[dict] = []
 _device_id: str | None = None
+_drm_id: str | None = None
 
 
 def init(config_dir: str) -> None:
     """Set the configuration directory and load any existing configuration."""
-    global _config_path, _activation_code, _pin, _boxes, _device_id
+    global _config_path, _activation_code, _pin, _boxes, _device_id, _drm_id
     _config_path = os.path.join(config_dir, _FILENAME)
     _LOG.info("Config file: %s", _config_path)
     _activation_code, _pin, _boxes = _load()
     _device_id = _load_device_id()
+    _drm_id = _load_value("drm_id")
     if is_configured():
         _LOG.info("Loaded saved config: %d cached box(es)", len(_boxes))
     else:
@@ -53,14 +56,18 @@ def _load() -> tuple[str | None, str | None, list[dict]]:
         return None, None, []
 
 
-def _load_device_id() -> str | None:
+def _load_value(key: str) -> str | None:
     if not _config_path or not os.path.exists(_config_path):
         return None
     try:
         with open(_config_path, "r", encoding="utf-8") as f:
-            return json.load(f).get("device_id")
+            return json.load(f).get(key)
     except (OSError, ValueError):
         return None
+
+
+def _load_device_id() -> str | None:
+    return _load_value("device_id")
 
 
 def get_device_id() -> str:
@@ -76,6 +83,20 @@ def get_device_id() -> str:
         _device_id = secrets.token_hex(8)
         _write()
     return _device_id
+
+
+def get_drm_id() -> str:
+    """
+    This installation's DRM id, a UUID made up on first use and then kept.
+
+    The Fetch app puts its device UUID in the websocket address as
+    ``verimatrix_id``; like the device id, each installation gets its own.
+    """
+    global _drm_id
+    if not _drm_id:
+        _drm_id = str(uuid.uuid4())
+        _write()
+    return _drm_id
 
 
 def is_configured() -> bool:
@@ -113,7 +134,7 @@ def _write() -> None:
     try:
         with open(_config_path, "w", encoding="utf-8") as f:
             json.dump({"activation_code": _activation_code, "pin": _pin, "boxes": _boxes,
-                       "device_id": _device_id}, f)
+                       "device_id": _device_id, "drm_id": _drm_id}, f)
             f.flush()
             # The sandboxed custom-driver process can be killed shortly after a
             # setup completes - fsync so the write survives that.

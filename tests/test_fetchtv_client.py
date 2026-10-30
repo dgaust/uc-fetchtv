@@ -45,7 +45,8 @@ async def main():
     assert ws_h["x-ftv-capabilities"] == "no_pin,android,v3.33.2.6562,tenplay_v2", ws_h
     assert ws_h["x-ftv-deviceid"] == "uc-intg-fetchtv" and "cookie" not in ws_h, ws_h
     assert "user-agent" not in ws_h, ws_h
-    own = fake.client(device_id="0123456789abcdef")
+    assert not any("verimatrix_id" in p for p in fake.ws_paths), "no DRM id unless the client has one"
+    own = fake.client(device_id="0123456789abcdef", drm_id="11111111-2222-3333-4444-555555555555")
     await own.login()
     assert any(lower(h)["x-ftv-deviceid"] == "0123456789abcdef" for h in fake.http_headers)
 
