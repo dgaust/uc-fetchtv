@@ -265,6 +265,13 @@ class Box:
         self.recordings_at = time.monotonic()
         if _LOG.isEnabledFor(logging.DEBUG):
             _LOG.debug("%s: recordings breakdown %s", self.name, _recordings_breakdown(data.get("recordings") or []))
+            _LOG.debug(
+                "%s: recording signatures %s",
+                self.name,
+                _recordings_signatures(
+                    data.get("recordings") or [], ("969981881998843", "969981816334867", "978481670488756500")
+                ),
+            )
         self.scheduled_count = len(data.get("currentFutureRecordings") or [])
         self.active_recording_ids = [str(i) for i in data.get("activeRecordings") or []]
         self.storage_info = data.get("storageInfo")
@@ -352,6 +359,30 @@ def _recordings_breakdown(raws: list[dict[str, Any]]) -> dict[str, Any]:
             if hit:
                 counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def _recording_signature(raw: dict[str, Any]) -> tuple:
+    return (
+        "pendingDelete" if raw.get("pendingDelete") else "kept",
+        "dlna" if raw.get("dlnaId") not in (None, -1) else "no-dlna",
+        "complete" if raw.get("size") == raw.get("dataReceived") else "partial",
+        raw.get("sourceType"),
+        raw.get("flags"),
+        "big-id" if isinstance(raw.get("id"), int) and raw["id"] > 2**53 else "",
+    )
+
+
+def _recordings_signatures(raws: list[dict[str, Any]], watch: tuple[str, ...]) -> dict[str, Any]:
+    """Group a box's recordings by their status fields, with the signature of watched ids."""
+    groups: dict[tuple, list[Any]] = {}
+    for raw in raws:
+        groups.setdefault(_recording_signature(raw), []).append(raw.get("id"))
+    return {
+        "groups": {str(k): (len(v), v[0]) for k, v in sorted(groups.items(), key=lambda kv: -len(kv[1]))[:14]},
+        "watch": {
+            w: _recording_signature(raw) for raw in raws for w in watch if str(raw.get("id")) == w
+        },
+    }
 
 
 def _recording(raw: dict[str, Any]) -> Recording | None:
