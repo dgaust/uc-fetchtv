@@ -103,6 +103,8 @@ class FakeFetch:
         self.wakes = True                       # False: a box ignores WAKE_STB
         self.silent: set[str] = set()           # boxes that answer nothing
         self.ws_connections = 0
+        self.ws_times: list[float] = []         # when each websocket connection was accepted
+        self.close_at_once = False              # accept the websocket, then close it straight away
         self.boxes = {
             LOUNGE: {"label": "Lounge", "standby": False,
                      "media": {"playbackType": "DVB", "channelId": "30411316",
@@ -207,10 +209,10 @@ class FakeFetch:
         if self._http is not None:
             self._http.shutdown()
 
-    async def drop_connections(self) -> None:
+    async def drop_connections(self, code: int = 1000) -> None:
         """Close every client websocket (simulates the service dropping us)."""
         for ws in list(self._clients):
-            await ws.close()
+            await ws.close(code=code)
 
     def client(self, code: str = ACTIVATION_CODE, pin: str = PIN, **kwargs):
         """A FetchTvClient pointed at this fake (usable as box_manager.client_factory)."""
@@ -244,6 +246,10 @@ class FakeFetch:
         self.ws_headers.append(dict(ws.request.headers.items()))
         self.ws_paths.append(ws.request.path)
         self.ws_connections += 1
+        self.ws_times.append(time.monotonic())
+        if self.close_at_once:
+            await ws.close()
+            return
         if self.expired or "auth=secret-token" not in ws.request.path:
             await ws.close(code=4001)
             return

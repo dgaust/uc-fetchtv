@@ -87,6 +87,9 @@ WS_OPEN_TIMEOUT_S = 15.0
 # A box with thousands of recordings sends a full report of several megabytes;
 # the websockets default of 1 MiB would close the connection on it, every time.
 WS_MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+# A connection that lasted this long counts as a good one: the next reconnect
+# starts from the short delay again instead of continuing to back off.
+STABLE_CONNECTION_S = 60.0
 # How often each box is pinged and asked for its state. The box pushes changes
 # on its own, but not reliably when it goes into or out of standby.
 POLL_INTERVAL_S = 60.0
@@ -514,6 +517,8 @@ class FetchTvClient:
         self._cookies: dict[str, str] = {}
         self._ws: Any = None
         self._running = False
+        self._stopping = asyncio.Event()
+        self._connected_since: float | None = None
         self._callbacks: list[Callback] = []
         self._guide: Guide | None = None
         self._guide_lock = asyncio.Lock()
@@ -577,12 +582,15 @@ class FetchTvClient:
     async def run(self) -> None:
         """Stay connected until ``stop()``: sign in, open the websocket, reconnect on failure."""
         self._running = True
+        self._stopping.clear()
         delay = self._reconnect_delay
         while self._running:
+            self._connected_since = None
             try:
                 await self.login()
+                if not self._running:
+                    break
                 await self._run_socket()
-                delay = self._reconnect_delay
             except AuthError as ex:
                 _LOG.error("FetchTV sign-in rejected: %s", ex)
                 self.auth_failed = True
@@ -594,13 +602,19 @@ class FetchTvClient:
             await self._set_connected(False)
             if not self._running:
                 break
+            if self._connected_since is not None and time.monotonic() - self._connected_since >= STABLE_CONNECTION_S:
+                delay = self._reconnect_delay
             _LOG.info("Reconnecting to FetchTV in %.0fs", delay)
-            await asyncio.sleep(delay)
+            try:
+                await asyncio.wait_for(self._stopping.wait(), delay)
+            except asyncio.TimeoutError:
+                pass
             delay = min(delay * 2, RECONNECT_DELAY_MAX_S)
 
     async def stop(self) -> None:
         """Disconnect and stop reconnecting."""
         self._running = False
+        self._stopping.set()
         for task in list(self._tasks):
             task.cancel()
         ws = self._ws
@@ -930,7 +944,10 @@ class FetchTvClient:
             ping_interval=30,
             max_size=WS_MAX_MESSAGE_BYTES,
         ) as ws:
+            if not self._running:  # stop() came while the connection was being opened
+                return
             self._ws = ws
+            self._connected_since = time.monotonic()
             await self._set_connected(True)
             poller = asyncio.create_task(self._poll())
             try:
