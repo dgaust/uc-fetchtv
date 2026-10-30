@@ -115,6 +115,8 @@ CHANNEL_LIST_MAX_AGE_S = 24 * 3600
 GUIDE_RETRY_S = 30.0
 # A channel the guide has no listings for is not asked about again for this long.
 NO_LISTINGS_RETRY_S = 120.0
+# The most often the service is signed in to again because an API call was refused.
+RELOGIN_MIN_INTERVAL_S = 60.0
 
 # Remote key names the box accepts in a KEYEVENT message.
 KEY_BACK = "KEY_BACK"
@@ -565,6 +567,8 @@ class FetchTvClient:
         self._programs_lock = asyncio.Lock()
         self._guide_retry_at = 0.0
         self._programs_retry_at = 0.0
+        self._relogin_lock = asyncio.Lock()
+        self._relogin_at: float | None = None
         self.boxes: dict[str, Box] = {}
         self._alive_waiters: dict[str, asyncio.Event] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -905,8 +909,7 @@ class FetchTvClient:
     async def _fetch_programs(self, guide: Guide, keys: list[str], count: int) -> None:
         """Fetch listings for guide keys into the cache; a failure pauses further lookups for a while."""
         try:
-            _, _, body = await asyncio.to_thread(
-                self._http,
+            _, _, body = await self._api(
                 "GET",
                 "/v2/epg/programslist",
                 params={
@@ -986,6 +989,33 @@ class FetchTvClient:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
             return resp.status, resp.headers, json.loads(resp.read())
 
+    async def _api(self, method: str, path: str, **kwargs: Any) -> tuple[int, Any, Any]:
+        """
+        An HTTP request off the event loop. If the service says the auth cookie
+        no longer works (401 or 403), sign in again and try once more.
+        """
+        try:
+            return await asyncio.to_thread(self._http, method, path, **kwargs)
+        except urllib.error.HTTPError as ex:
+            if ex.code not in (401, 403) or not await self._relogin():
+                raise
+        return await asyncio.to_thread(self._http, method, path, **kwargs)
+
+    async def _relogin(self) -> bool:
+        """Sign in again for a fresh cookie, at most once in ``RELOGIN_MIN_INTERVAL_S``."""
+        async with self._relogin_lock:
+            now = time.monotonic()
+            if self._relogin_at is not None and now - self._relogin_at < RELOGIN_MIN_INTERVAL_S:
+                return False
+            self._relogin_at = now
+            _LOG.info("The service no longer accepts the sign-in; signing in again")
+            try:
+                await self.login()
+            except FetchTvError as ex:
+                _LOG.warning("Signing in again failed: %s", ex)
+                return False
+            return True
+
     async def _ensure_guide(self) -> None:
         async with self._guide_lock:
             if self._guide and time.monotonic() - self._guide.loaded_at < CHANNEL_LIST_MAX_AGE_S:
@@ -993,7 +1023,7 @@ class FetchTvClient:
             if time.monotonic() < self._guide_retry_at:
                 return
             try:
-                _, _, body = await asyncio.to_thread(self._http, "GET", "/v2/epg/channels")
+                _, _, body = await self._api("GET", "/v2/epg/channels")
             except _HTTP_ERRORS as ex:
                 _LOG.warning("Could not load the FetchTV channel list: %s", ex)
                 self._guide_retry_at = time.monotonic() + GUIDE_RETRY_S
