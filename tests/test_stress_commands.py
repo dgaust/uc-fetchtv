@@ -207,6 +207,13 @@ async def stopped_while_pending(fake):
 
 async def typing(fake):
     client, task = await connected_client(fake)
+    # Two texts typed at once come out one after the other, not mixed.
+    fake.ws_received.clear()
+    await client.type_text(LOUNGE, "aaaaaaaa")
+    await client.type_text(LOUNGE, "bbbbbbbb")
+    await idle(client)
+    typed = "".join(chr(m["keyCode"]) for m in types(fake, LOUNGE, "KEYCODE"))
+    assert typed == "aaaaaaaabbbbbbbb", f"texts were mixed: {typed!r}"
     # Over the cap, the extra is dropped.
     fake.ws_received.clear()
     await client.type_text(LOUNGE, "x" * 500)
@@ -220,7 +227,8 @@ async def typing(fake):
                        ("日本", StatusCodes.BAD_REQUEST), ("a‮b", StatusCodes.BAD_REQUEST), ("!@#$%^&*()", StatusCodes.OK)):
         assert await remote(None, "send_cmd", {"command": "TYPE:" + text}, None) == code, repr(text)
     await idle(client)
-    assert len(types(fake, LOUNGE, "KEYCODE")) == len("hello world!@#$%^&*()")
+    typed = "".join(chr(m["keyCode"]) for m in types(fake, LOUNGE, "KEYCODE"))
+    assert typed == "hello world!@#$%^&*()", typed
     await stop(client, task)
 
 

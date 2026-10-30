@@ -525,6 +525,7 @@ class FetchTvClient:
         self.boxes: dict[str, Box] = {}
         self._alive_waiters: dict[str, asyncio.Event] = {}
         self._tasks: set[asyncio.Task] = set()
+        self._typing_locks: dict[str, asyncio.Lock] = {}
         # Plays waiting for a box in standby to wake, per box, in the order asked.
         self._pending_plays: dict[str, list[tuple[str, dict[str, Any]]]] = {}
         self.connected = False
@@ -746,12 +747,14 @@ class FetchTvClient:
         task.add_done_callback(self._tasks.discard)
 
     async def _type_chars(self, terminal_id: str, text: str) -> None:
-        try:
-            for char in text:
-                await self.send_keycode(terminal_id, char)
-                await asyncio.sleep(TYPE_DELAY_S)
-        except NotConnectedError:
-            _LOG.debug("Not connected: stopped typing to %s", terminal_id)
+        # One text at a time per box: two typed together would come out mixed.
+        async with self._typing_locks.setdefault(terminal_id, asyncio.Lock()):
+            try:
+                for char in text:
+                    await self.send_keycode(terminal_id, char)
+                    await asyncio.sleep(TYPE_DELAY_S)
+            except NotConnectedError:
+                _LOG.debug("Not connected: stopped typing to %s", terminal_id)
 
     async def play_recording(self, terminal_id: str, recording_id: str) -> None:
         """
