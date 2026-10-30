@@ -19,6 +19,7 @@ channel up/down - so activities can use them, and ships a default layout:
 """
 
 import asyncio
+import logging
 from typing import Any, Callable
 
 from ucapi import StatusCodes
@@ -35,6 +36,8 @@ from ucapi.ui import (
 
 import fetchtv
 from fetchtv import Box, FetchTvClient
+
+_LOG = logging.getLogger(__name__)
 
 _PREFIX = "remote."
 
@@ -172,6 +175,9 @@ def _make_handler(terminal_id: str, get_client: ClientGetter):
             return await _run(client, box, cmd_id, params or {})
         except fetchtv.NotConnectedError:
             return StatusCodes.SERVICE_UNAVAILABLE
+        except Exception:  # noqa: BLE001 - answer the Remote rather than leave it waiting
+            _LOG.exception("Command %s failed", cmd_id)
+            return StatusCodes.SERVER_ERROR
 
     return _handler
 

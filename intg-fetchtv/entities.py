@@ -499,6 +499,9 @@ def _make_cmd_handler(terminal_id: str, get_client: ClientGetter):
             return await _run_command(client, box, cmd_id, params or {})
         except fetchtv.NotConnectedError:
             return StatusCodes.SERVICE_UNAVAILABLE
+        except Exception:  # noqa: BLE001 - answer the Remote rather than leave it waiting
+            _LOG.exception("Command %s failed", cmd_id)
+            return StatusCodes.SERVER_ERROR
 
     return _handler
 
@@ -515,6 +518,9 @@ def _make_select_handler(terminal_id: str, get_client: ClientGetter):
             return await _run_select_command(client, box, cmd_id, params or {})
         except fetchtv.NotConnectedError:
             return StatusCodes.SERVICE_UNAVAILABLE
+        except Exception:  # noqa: BLE001 - answer the Remote rather than leave it waiting
+            _LOG.exception("Select command %s failed", cmd_id)
+            return StatusCodes.SERVER_ERROR
 
     return _handler
 

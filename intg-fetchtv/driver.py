@@ -80,7 +80,7 @@ async def main() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     level = os.getenv("UC_LOG_LEVEL", "INFO").upper()
-    for name in ("driver", "box_manager", "setup_flow", "entities", "config", "fetchtv"):
+    for name in ("driver", "box_manager", "setup_flow", "entities", "remote_entity", "sensors", "config", "fetchtv"):
         logging.getLogger(name).setLevel(level)
     # ucapi logs every websocket message at DEBUG, including the setup request
     # that carries the activation code and PIN. Keep it quiet unless asked for,
