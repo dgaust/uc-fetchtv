@@ -203,7 +203,7 @@ def _delay_s(value: Any, default_ms: int) -> float:
 # FETCHTV_EXPERIMENTAL=1, and only these message types can be sent this way
 # (nothing that deletes or changes anything). Send as a free-text send_cmd:
 #   EXPERIMENT PLAY_ASSET {"assetId": 123}
-EXPERIMENT_TYPES = frozenset({"PLAY_ASSET"})
+EXPERIMENT_TYPES = frozenset({"PLAY_ASSET", "GET_RECORDINGS_SUMMARY"})
 
 
 def _is_experiment(command: Any) -> bool:

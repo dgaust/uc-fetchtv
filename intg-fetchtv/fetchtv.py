@@ -1084,6 +1084,10 @@ class FetchTvClient:
             "onlyPairedSetTopBox": paired_only,
         }
         if extra:
+            extra = dict(extra)
+            # A "data" object goes alongside the message id rather than replacing it.
+            if isinstance(extra.get("data"), dict):
+                message["data"].update(extra.pop("data"))
             message.update(extra)
         try:
             await ws.send(json.dumps({"to": terminal_id, "message": message}))

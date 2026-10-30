@@ -187,6 +187,9 @@ assert run("send_cmd", {"command": exp}) == StatusCodes.BAD_REQUEST and client.s
 os.environ["FETCHTV_EXPERIMENTAL"] = "1"
 assert run("send_cmd", {"command": exp}) == StatusCodes.OK
 assert client.sent == [("raw", "PLAY_ASSET", {"assetId": 5})], client.sent
+assert run("send_cmd", {"command": 'EXPERIMENT GET_RECORDINGS_SUMMARY {"data": {"past": true}}'}) == StatusCodes.OK
+assert client.sent[-1] == ("raw", "GET_RECORDINGS_SUMMARY", {"data": {"past": True}}), client.sent[-1]
+client.sent.pop()
 for bad in ('EXPERIMENT PENDING_DELETE_RECORDINGS_BY_ID {"recordingIds": [1]}',
             'EXPERIMENT PLAY_ASSET nope', 'EXPERIMENT PLAY_ASSET [1]'):
     assert run("send_cmd", {"command": bad}) == StatusCodes.BAD_REQUEST, bad
