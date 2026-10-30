@@ -113,6 +113,13 @@ Home and Power are left alone.
 [Troubleshooting](docs/troubleshooting.md) ·
 [Development](docs/development.md)
 
+## Credits
+
+Fetch doesn't document its service. This project builds on what
+[jinxo13/pyfetchtv](https://github.com/jinxo13/pyfetchtv) worked out about it
+(endpoints, messages, key names); no code is copied. It uses the
+[Unfolded Circle Python integration library](https://github.com/unfoldedcircle/integration-python-library).
+
 ## License
 
 [MPL-2.0](LICENSE). Third-party licences are in
