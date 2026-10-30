@@ -28,6 +28,7 @@ as worked out by the pyfetchtv project (https://github.com/jinxo13/pyfetchtv).
 import asyncio
 import json
 import logging
+import os
 import time
 import urllib.error
 import urllib.parse
@@ -50,6 +51,15 @@ _HEADERS = {
     "X-FTV-Timeout": "3",
     "X-FTV-DeviceID": "uc-intg-fetchtv",
 }
+
+def experimental() -> bool:
+    """
+    True when FETCHTV_EXPERIMENTAL=1: turns on features that aren't finished
+    (the Recordings folder, which can list but not play, and the raw
+    ``PLAY_ASSET`` experiments), so users don't see them.
+    """
+    return os.environ.get("FETCHTV_EXPERIMENTAL") == "1"
+
 
 # Messages that mean the list of recordings has changed.
 _RECORDING_EVENTS = frozenset({

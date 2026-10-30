@@ -32,14 +32,14 @@ every push.
 
 ## Unfinished features (hidden)
 
-Off unless an environment variable is set, so users don't see them:
+Off unless `FETCHTV_EXPERIMENTAL=1` is set, so users don't see them:
 
-- `FETCHTV_RECORDINGS=1`: a **Recordings** folder in the media browser. It
-  lists the box's recordings but they can't be played yet: how a box is told to
-  play one isn't known (`PLAY_ASSET` guesses got no reply).
-- `FETCHTV_EXPERIMENTAL=1`: lets the remote entity send a `PLAY_ASSET` message
-  as a free-text command, `EXPERIMENT PLAY_ASSET {"...": ...}`, for working out
-  that format. Nothing else can be sent this way.
+- A **Recordings** folder in the media browser. It lists the box's recordings
+  but they can't be played yet: how a box is told to play one isn't known
+  (`PLAY_ASSET` guesses got no reply).
+- The remote entity can send a `PLAY_ASSET` message as a free-text command,
+  `EXPERIMENT PLAY_ASSET {"...": ...}`, for working out that format. Nothing
+  else can be sent this way.
 
 ## Releases (automated)
 

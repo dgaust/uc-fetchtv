@@ -20,7 +20,6 @@ channel up/down - so activities can use them, and ships a default layout:
 
 import asyncio
 import json
-import os
 from typing import Any, Callable
 
 from ucapi import StatusCodes
@@ -197,7 +196,7 @@ EXPERIMENT_TYPES = frozenset({"PLAY_ASSET"})
 
 def _is_experiment(command: Any) -> bool:
     return (
-        os.environ.get("FETCHTV_EXPERIMENTAL") == "1"
+        fetchtv.experimental()
         and isinstance(command, str)
         and command.startswith("EXPERIMENT ")
     )
