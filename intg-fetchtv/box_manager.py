@@ -87,7 +87,7 @@ async def connect() -> None:
     if not code or not pin:
         _LOG.debug("Cannot connect: no Fetch account configured yet")
         return
-    await _start(client_factory(code, pin))
+    await _start(client_factory(code, pin, device_id=config.get_device_id()))
 
 
 async def connect_for_setup(activation_code: str, pin: str) -> list[fetchtv.Box]:
@@ -99,7 +99,7 @@ async def connect_for_setup(activation_code: str, pin: str) -> list[fetchtv.Box]
     new client replaces any existing one and stays running, so there is only
     ever one connection for the lifetime of the driver.
     """
-    client = client_factory(activation_code, pin)
+    client = client_factory(activation_code, pin, device_id=config.get_device_id())
     boxes = await client.login()
     await disconnect()
     await _start(client)

@@ -15,6 +15,7 @@ entities aren't already registered at that moment the subscribe fails with
 import json
 import logging
 import os
+import secrets
 
 _LOG = logging.getLogger(__name__)
 
@@ -24,14 +25,16 @@ _config_path: str | None = None
 _activation_code: str | None = None
 _pin: str | None = None
 _boxes: list[dict] = []
+_device_id: str | None = None
 
 
 def init(config_dir: str) -> None:
     """Set the configuration directory and load any existing configuration."""
-    global _config_path, _activation_code, _pin, _boxes
+    global _config_path, _activation_code, _pin, _boxes, _device_id
     _config_path = os.path.join(config_dir, _FILENAME)
     _LOG.info("Config file: %s", _config_path)
     _activation_code, _pin, _boxes = _load()
+    _device_id = _load_device_id()
     if is_configured():
         _LOG.info("Loaded saved config: %d cached box(es)", len(_boxes))
     else:
@@ -48,6 +51,31 @@ def _load() -> tuple[str | None, str | None, list[dict]]:
     except (OSError, ValueError) as ex:
         _LOG.error("Cannot read config file %s: %s", _config_path, ex)
         return None, None, []
+
+
+def _load_device_id() -> str | None:
+    if not _config_path or not os.path.exists(_config_path):
+        return None
+    try:
+        with open(_config_path, "r", encoding="utf-8") as f:
+            return json.load(f).get("device_id")
+    except (OSError, ValueError):
+        return None
+
+
+def get_device_id() -> str:
+    """
+    This installation's device id, made up on first use and then kept.
+
+    The Fetch app sends its Android id (16 hex characters) as ``X-FTV-DeviceID``.
+    Every installation gets its own random id of the same form, rather than all
+    sharing one, so Fetch's service sees separate devices.
+    """
+    global _device_id
+    if not _device_id:
+        _device_id = secrets.token_hex(8)
+        _write()
+    return _device_id
 
 
 def is_configured() -> bool:
@@ -84,7 +112,8 @@ def _write() -> None:
         return
     try:
         with open(_config_path, "w", encoding="utf-8") as f:
-            json.dump({"activation_code": _activation_code, "pin": _pin, "boxes": _boxes}, f)
+            json.dump({"activation_code": _activation_code, "pin": _pin, "boxes": _boxes,
+                       "device_id": _device_id}, f)
             f.flush()
             # The sandboxed custom-driver process can be killed shortly after a
             # setup completes - fsync so the write survives that.

@@ -43,14 +43,28 @@ _LOG = logging.getLogger(__name__)
 API_BASE = "https://apis.fetchtv.com.au"
 WS_URL = "wss://messages.fetchtv.com.au/v2/message/ws/messages"
 
-# Headers the Fetch Android app sends; the service rejects requests without
-# the capabilities header.
-_HEADERS = {
-    "Accept": "application/json",
-    "X-FTV-Capabilities": "no_pin,android,v3.21.1.4988,tenplay_v2",
-    "X-FTV-Timeout": "3",
-    "X-FTV-DeviceID": "uc-intg-fetchtv",
-}
+# What the Fetch Android app (3.33.2, version code 6562) sends, so that this
+# looks like an ordinary client to Fetch's service, which rejects requests
+# without the capabilities header. The app is built on OkHttp 4.12.0 (its
+# User-Agent) and sends the capabilities as "no_pin,android,v<version>.<build>".
+APP_VERSION = "3.33.2.6562"
+CAPABILITIES = f"no_pin,android,v{APP_VERSION},tenplay_v2"
+USER_AGENT = "okhttp/4.12.0"
+# The app sends its connect timeout in seconds with each request: 30 at first.
+REQUEST_TIMEOUT_HEADER = "30"
+# Stand-in when no device id is given (tests); the driver passes a per-install one.
+DEFAULT_DEVICE_ID = "uc-intg-fetchtv"
+
+
+def request_headers(device_id: str) -> dict[str, str]:
+    """The headers the app puts on every API request."""
+    return {
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT,
+        "X-FTV-Capabilities": CAPABILITIES,
+        "X-FTV-Timeout": REQUEST_TIMEOUT_HEADER,
+        "X-FTV-DeviceID": device_id,
+    }
 
 def experimental() -> bool:
     """
@@ -453,7 +467,9 @@ class FetchTvClient:
         ws_url: str = WS_URL,
         poll_interval: float = POLL_INTERVAL_S,
         reconnect_delay: float = RECONNECT_DELAY_S,
+        device_id: str = DEFAULT_DEVICE_ID,
     ):
+        self._device_id = device_id
         self._activation_code = activation_code
         self._pin = pin
         self._api_base = api_base.rstrip("/")
@@ -746,7 +762,7 @@ class FetchTvClient:
         url = self._api_base + path
         if params:
             url += "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url, method=method, headers=dict(_HEADERS))
+        req = urllib.request.Request(url, method=method, headers=request_headers(self._device_id))
         if data is not None:
             req.data = urllib.parse.urlencode(data).encode()
             req.add_header("Content-Type", "application/x-www-form-urlencoded")
@@ -771,9 +787,14 @@ class FetchTvClient:
             )
 
     async def _run_socket(self) -> None:
+        # Connected the way the app does: the auth cookie in the URL, the
+        # capabilities and device id as headers, and no User-Agent.
+        url = f"{self._ws_url}?auth={urllib.parse.quote(self._cookies['auth'], safe='')}"
+        headers = request_headers(self._device_id)
         async with websockets.connect(
-            self._ws_url,
-            additional_headers={"Cookie": f"auth={self._cookies['auth']}"},
+            url,
+            additional_headers={k: headers[k] for k in ("X-FTV-Capabilities", "X-FTV-DeviceID")},
+            user_agent_header=None,
             open_timeout=WS_OPEN_TIMEOUT_S,
             ping_interval=30,
         ) as ws:

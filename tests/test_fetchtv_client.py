@@ -30,6 +30,25 @@ async def main():
     task = asyncio.create_task(client.run())
     await asyncio.wait_for(client.ready.wait(), 5)
 
+    # Requests look like the Fetch Android app's: its capabilities string and
+    # User-Agent, and the device id the client was given.
+    assert fake.http_headers, "no HTTP requests seen"
+    lower = lambda h: {k.lower(): v for k, v in h.items()}  # header names are case-insensitive
+    for h in map(lower, fake.http_headers):
+        assert h["x-ftv-capabilities"] == "no_pin,android,v3.33.2.6562,tenplay_v2", h
+        assert h["user-agent"] == "okhttp/4.12.0" and h["x-ftv-deviceid"] == "uc-intg-fetchtv", h
+        assert h["x-ftv-timeout"] == "30", h
+    # The websocket is opened as the app does: the cookie in the URL, the
+    # capabilities and device id as headers, no Cookie header and no User-Agent.
+    assert fake.ws_paths and all("?auth=secret-token" in p for p in fake.ws_paths), fake.ws_paths
+    ws_h = lower(fake.ws_headers[-1])
+    assert ws_h["x-ftv-capabilities"] == "no_pin,android,v3.33.2.6562,tenplay_v2", ws_h
+    assert ws_h["x-ftv-deviceid"] == "uc-intg-fetchtv" and "cookie" not in ws_h, ws_h
+    assert "user-agent" not in ws_h, ws_h
+    own = fake.client(device_id="0123456789abcdef")
+    await own.login()
+    assert any(lower(h)["x-ftv-deviceid"] == "0123456789abcdef" for h in fake.http_headers)
+
     # Disabled terminals are skipped; names come from the account.
     assert set(client.boxes) == {LOUNGE, BEDROOM}, client.boxes
     lounge, bedroom = client.boxes[LOUNGE], client.boxes[BEDROOM]

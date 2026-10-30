@@ -85,6 +85,9 @@ class FakeFetch:
 
     def __init__(self):
         self.http_requests: list[tuple[str, str]] = []
+        self.http_headers: list[dict] = []
+        self.ws_headers: list[dict] = []
+        self.ws_paths: list[str] = []
         self.ws_received: list[dict] = []
         self.logins = 0
         self.reject_login = False
@@ -123,6 +126,7 @@ class FakeFetch:
 
             def do_POST(self):
                 fake.http_requests.append(("POST", self.path))
+                fake.http_headers.append(dict(self.headers))
                 if self.path != "/v3/authenticate":
                     return self._json(404, {})
                 length = int(self.headers.get("Content-Length") or 0)
@@ -144,6 +148,7 @@ class FakeFetch:
             def do_GET(self):
                 url = urlparse(self.path)
                 fake.http_requests.append(("GET", url.path))
+                fake.http_headers.append(dict(self.headers))
                 if "auth=secret-token" not in (self.headers.get("Cookie") or ""):
                     return self._json(401, {})
                 if url.path == "/v2/epg/channels":
@@ -200,8 +205,9 @@ class FakeFetch:
         return {"standby": box["standby"], "ipAddress": "10.0.0.2", "hiddenChannels": [30999999]}
 
     async def _ws_handler(self, ws) -> None:
-        cookie = ws.request.headers.get("Cookie") or ""
-        if "auth=secret-token" not in cookie:
+        self.ws_headers.append(dict(ws.request.headers.items()))
+        self.ws_paths.append(ws.request.path)
+        if "auth=secret-token" not in ws.request.path:
             await ws.close(code=4001)
             return
         self._clients.add(ws)

@@ -30,6 +30,22 @@ channel browser and select), the remote entity (commands and default layout),
 and the driver end to end over the Remote's websocket API. CI runs them on
 every push.
 
+## Matching the Fetch app
+
+So that Fetch's service sees an ordinary client, requests mirror what the Fetch
+Android app (3.33.2, version code 6562) sends, found by reading the app itself:
+
+- HTTP: `X-FTV-Capabilities: no_pin,android,v3.33.2.6562,tenplay_v2`,
+  `X-FTV-Timeout: 30`, `X-FTV-DeviceID`, `User-Agent: okhttp/4.12.0`.
+- Websocket: `wss://messages.fetchtv.com.au/v2/message/ws/messages?auth=<cookie>`
+  with the capabilities and device id headers and no User-Agent. The app also
+  sends a `verimatrix_id` (a DRM id); it isn't needed.
+- The device id is a random 16-character hex string made once per installation
+  and kept in `config.json` (the app sends its Android id, the same shape).
+
+When the app is updated, bump `APP_VERSION` in `fetchtv.py` to its
+`<version>.<version code>`.
+
 ## Unfinished features (hidden)
 
 Off unless `FETCHTV_EXPERIMENTAL=1` is set, so users don't see them:
