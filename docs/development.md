@@ -78,7 +78,7 @@ intg-fetchtv/
   fetchtv.py       talks to Fetch's service (sign-in, box messages, guide)
   entities.py      turns each box into a media player and a channel select, and builds the browser
   remote_entity.py the remote entity: every key, default buttons and pages
-  sensors.py       status sensors: recordings, scheduled, recording now
+  sensors.py       status sensors: recordings, scheduled, recording now, disk
   placeholder.py   the TV image shown for channels without a logo
   config.py        saves the account and box list
   shared.py        shared setup used by the other files

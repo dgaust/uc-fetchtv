@@ -96,7 +96,7 @@ async def main():
         resp = await request("get_available_entities")
         found = {x["entity_id"]: x for x in resp["msg_data"]["available_entities"]}
         sensor_ids = {i for t in (LOUNGE, BEDROOM) for i in sensors.entity_ids(t)}
-        assert len(sensor_ids) == 6
+        assert len(sensor_ids) == 10
         assert set(found) == {LOUNGE_ID, BEDROOM_ID, LOUNGE_SEL, BEDROOM_SEL, LOUNGE_REM, BEDROOM_REM} | sensor_ids, found
         assert found[LOUNGE_REM]["name"] == {"en": "Lounge remote"}
         assert "GUIDE" in found[LOUNGE_REM]["options"]["simple_commands"]

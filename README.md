@@ -63,7 +63,7 @@ import [`cosmos-compose.json`](cosmos-compose.json).
 
 ## Entities and commands
 
-Each box is added as a media player, a channel select, a remote and three sensors.
+Each box is added as a media player, a channel select, a remote and five sensors.
 
 ### Media player
 
@@ -87,7 +87,7 @@ Playing a channel or recording on a box that is in standby wakes it first, then 
 
 ### Sensors
 
-Three per box, for automations: **recordings** (how many are on the box), **scheduled recordings** (how many are scheduled) and **recording now** (Yes or No). They update when the box sends its full report, at start-up and when you open the Recordings folder.
+Five per box, for automations: **recordings** (how many are on the box), **scheduled recordings** (how many are scheduled), **recording now** (Yes or No), **free space** (GB) and **disk used** (%). They update when the box sends its full report, at start-up and when you open the Recordings folder.
 
 ### Remote
 
