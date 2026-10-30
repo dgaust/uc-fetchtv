@@ -260,7 +260,9 @@ async def _press(
     elif command == START_OVER:
         return await client.start_over_current(box)
     elif command in VOLUME_STEPS:
-        await client.set_volume(box.terminal_id, (box.volume or 0) + VOLUME_STEPS[command])
+        if box.volume is None:  # a step needs a level to start from
+            return False
+        await client.set_volume(box.terminal_id, box.volume + VOLUME_STEPS[command])
     else:
         # Step from the channel this command last tuned: the box's own report
         # lags behind, so repeated presses would otherwise all pick the same one.

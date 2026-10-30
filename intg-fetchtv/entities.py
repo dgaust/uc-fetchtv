@@ -565,8 +565,10 @@ async def _run_command(
             return StatusCodes.BAD_REQUEST
         await client.set_volume(tid, level)
     elif cmd_id in (Cmd.VOLUME_UP, Cmd.VOLUME_DOWN):
+        if box.volume is None:  # a step needs a level to start from
+            return StatusCodes.SERVICE_UNAVAILABLE
         step = VOLUME_STEP if cmd_id == Cmd.VOLUME_UP else -VOLUME_STEP
-        await client.set_volume(tid, (box.volume or 0) + step)
+        await client.set_volume(tid, box.volume + step)
     elif cmd_id == Cmd.TOGGLE:
         await client.send_key(tid, fetchtv.KEY_POWER)
     elif cmd_id in (Cmd.ON, Cmd.OFF):

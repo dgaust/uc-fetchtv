@@ -139,6 +139,10 @@ box.volume = 30
 assert run(Cmd.VOLUME_UP) == StatusCodes.OK and client.sent[-1] == ("volume", TID, 35)
 assert run(Cmd.VOLUME_DOWN) == StatusCodes.OK and client.sent[-1] == ("volume", TID, 25)
 box.volume = None
+# Before the box has reported a level there is nothing to step from: don't jump to 5 or 0.
+sent = len(client.sent)
+assert run(Cmd.VOLUME_UP) == StatusCodes.SERVICE_UNAVAILABLE and run(Cmd.VOLUME_DOWN) == StatusCodes.SERVICE_UNAVAILABLE
+assert len(client.sent) == sent
 
 # Start over is a simple command; it needs something on a channel to restart.
 assert "START_OVER" in entity.options["simple_commands"]
