@@ -1,5 +1,6 @@
 """The remote entity: state, power, send_cmd / send_cmd_sequence, and the default layout."""
 import asyncio
+import os
 
 import _path  # noqa: F401 - puts intg-fetchtv on sys.path
 
@@ -24,6 +25,9 @@ class FakeClient(FetchTvClient):
 
     async def send_keycode(self, terminal_id, char):
         self.sent.append(("keycode", char))
+
+    async def send_raw(self, terminal_id, msg_type, extra):
+        self.sent.append(("raw", msg_type, extra))
 
     async def play_channel(self, terminal_id, channel_id):
         self.sent.append(("play", channel_id))
@@ -145,5 +149,20 @@ for page in pages:
     assert len(cells) == len(set(cells)), f"{page['page_id']} has overlapping items"
     assert all(0 <= x < grid["width"] and 0 <= y < grid["height"] for x, y in cells), page["page_id"]
     assert all(i["command"]["cmd_id"] in commands for i in page["items"]), page["page_id"]
+
+# Experiments (working out how to play a recording): off unless enabled, and
+# only a play message can be sent this way.
+client.sent.clear()
+exp = 'EXPERIMENT PLAY_ASSET {"assetId": 5}'
+os.environ.pop("FETCHTV_EXPERIMENTAL", None)
+assert run("send_cmd", {"command": exp}) == StatusCodes.BAD_REQUEST and client.sent == []
+os.environ["FETCHTV_EXPERIMENTAL"] = "1"
+assert run("send_cmd", {"command": exp}) == StatusCodes.OK
+assert client.sent == [("raw", "PLAY_ASSET", {"assetId": 5})], client.sent
+for bad in ('EXPERIMENT PENDING_DELETE_RECORDINGS_BY_ID {"recordingIds": [1]}',
+            'EXPERIMENT PLAY_ASSET nope', 'EXPERIMENT PLAY_ASSET [1]'):
+    assert run("send_cmd", {"command": bad}) == StatusCodes.BAD_REQUEST, bad
+assert len(client.sent) == 1
+os.environ.pop("FETCHTV_EXPERIMENTAL")
 
 print("REMOTE_ENTITY_TEST_PASSED")

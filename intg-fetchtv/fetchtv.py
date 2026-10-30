@@ -543,6 +543,11 @@ class FetchTvClient:
             terminal_id, "PLAY_CHANNEL", requires_stb=True, extra={"channelId": int(channel_id)}
         )
 
+    async def send_raw(self, terminal_id: str, msg_type: str, extra: dict[str, Any]) -> None:
+        """Send an arbitrary message to a box (experiments only: see remote_entity)."""
+        _LOG.info("Experimental message to %s: %s %s", terminal_id, msg_type, extra)
+        await self._send(terminal_id, msg_type, requires_stb=True, extra=extra)
+
     async def request_media_state(self, terminal_id: str) -> None:
         """Ask a box to report what it is playing."""
         await self._send(terminal_id, "MEDIA_STATE", requires_stb=True)
@@ -798,6 +803,9 @@ class FetchTvClient:
                 await self._send(box.terminal_id, "ARE_YOU_ALIVE", queueable=True, paired_only=True)
             return
         else:
+            # Anything else is not acted on, but its content is what to look at
+            # when working out a message the box sends (command errors, say).
+            _LOG.debug("%s <- %s data: %s", box.name, msg_type, data)
             return
         await self._notify(box)
 

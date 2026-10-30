@@ -19,6 +19,8 @@ channel up/down - so activities can use them, and ships a default layout:
 """
 
 import asyncio
+import json
+import os
 from typing import Any, Callable
 
 from ucapi import StatusCodes
@@ -186,6 +188,33 @@ def _delay_s(value: Any, default_ms: int) -> float:
         return default_ms / 1000
 
 
+# Working out how a box is told to play a recording. Off unless
+# FETCHTV_EXPERIMENTAL=1, and only these message types can be sent this way
+# (nothing that deletes or changes anything). Send as a free-text send_cmd:
+#   EXPERIMENT PLAY_ASSET {"assetId": 123}
+EXPERIMENT_TYPES = frozenset({"PLAY_ASSET"})
+
+
+def _is_experiment(command: Any) -> bool:
+    return (
+        os.environ.get("FETCHTV_EXPERIMENTAL") == "1"
+        and isinstance(command, str)
+        and command.startswith("EXPERIMENT ")
+    )
+
+
+async def _experiment(client: FetchTvClient, box: Box, command: str) -> StatusCodes:
+    try:
+        _, msg_type, payload = command.split(" ", 2)
+        extra = json.loads(payload)
+    except ValueError:
+        return StatusCodes.BAD_REQUEST
+    if msg_type not in EXPERIMENT_TYPES or not isinstance(extra, dict):
+        return StatusCodes.BAD_REQUEST
+    await client.send_raw(box.terminal_id, msg_type, extra)
+    return StatusCodes.OK
+
+
 async def _run(client: FetchTvClient, box: Box, cmd_id: str, params: dict[str, Any]) -> StatusCodes:
     tid = box.terminal_id
     if cmd_id in (Commands.ON, Commands.OFF):
@@ -196,6 +225,9 @@ async def _run(client: FetchTvClient, box: Box, cmd_id: str, params: dict[str, A
     if cmd_id == Commands.TOGGLE:
         await client.send_key(tid, fetchtv.KEY_POWER)
         return StatusCodes.OK
+
+    if cmd_id == Commands.SEND_CMD and _is_experiment(params.get("command")):
+        return await _experiment(client, box, str(params["command"]))
 
     if cmd_id == Commands.SEND_CMD:
         sequence = [params.get("command")]
