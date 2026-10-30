@@ -51,6 +51,16 @@ _HEADERS = {
     "X-FTV-DeviceID": "uc-intg-fetchtv",
 }
 
+# Messages that mean the list of recordings has changed.
+_RECORDING_EVENTS = frozenset({
+    "RECORDINGS_UPDATE",
+    "RECORDING_UPDATED",
+    "RECORD_PROGRAM_SUCCESS",
+    "RECORD_PROGRAM_STOP",
+    "PENDING_DELETE_RECORDINGS_BY_ID_SUCCESS",
+    "RESTORE_RECORDINGS_BY_ID_SUCCESS",
+})
+
 HTTP_TIMEOUT_S = 20.0
 WS_OPEN_TIMEOUT_S = 15.0
 # How often each box is pinged and asked for its state. The box pushes changes
@@ -144,6 +154,29 @@ class Program:
 
 
 @dataclass
+class Recording:
+    """A programme recorded on a box's disk."""
+
+    id: str
+    title: str
+    episode_title: str = ""
+    season: str = ""
+    episode: str = ""
+    channel_id: str = ""
+    synopsis: str = ""
+    start_ms: int = 0
+    series_id: str = ""
+
+    @property
+    def label(self) -> str:
+        """Season / episode numbers and the episode title, as far as known."""
+        numbers = " ".join(
+            part for part in (f"S{self.season}" if self.season else "", f"E{self.episode}" if self.episode else "") if part
+        )
+        return " · ".join(part for part in (numbers, self.episode_title) if part)
+
+
+@dataclass
 class Box:
     """A FetchTV set-top box on the account, and its last known state."""
 
@@ -159,6 +192,10 @@ class Box:
     play_state: str = ""
     fta_channels: list[Channel] = field(default_factory=list)
     hidden_channel_ids: set[str] = field(default_factory=set)
+    recordings: list[Recording] = field(default_factory=list)
+    # Monotonic time of the last full box report, which carries the recordings;
+    # 0 when they may be out of date (a recording started or ended).
+    recordings_at: float = 0.0
 
     @property
     def has_state(self) -> bool:
@@ -174,6 +211,17 @@ class Box:
         self.fta_channels = [
             c for c in (_fta_channel(raw) for raw in data.get("ftaChannels") or []) if c
         ]
+        self.recordings = [
+            r for r in (_recording(raw) for raw in data.get("recordings") or []) if r
+        ]
+        self.recordings_at = time.monotonic()
+        _LOG.debug(
+            "%s: %d recordings; report keys %s; first recording %s",
+            self.name,
+            len(self.recordings),
+            sorted(data),
+            (data.get("recordings") or [None])[0],
+        )
         self.apply_playback(data.get("state"))
 
     def apply_media_state(self, data: dict[str, Any]) -> None:
@@ -211,6 +259,25 @@ def _fta_channel(raw: dict[str, Any]) -> Channel | None:
         epg_id=str(raw["epg_id"]),
         number=_to_int(raw.get("number")),
         name=str(raw.get("name") or raw["id"]),
+    )
+
+
+def _recording(raw: dict[str, Any]) -> Recording | None:
+    """A recording from the box's report; None for deleted or unnamed ones."""
+    if raw.get("id") is None or raw.get("pendingDelete") or not raw.get("name"):
+        return None
+    start = _to_int(raw.get("programStartDate") or raw.get("startDate") or raw.get("creationDate"))
+    # Fetch times are epoch milliseconds; tolerate seconds.
+    return Recording(
+        id=str(raw["id"]),
+        title=str(raw["name"]),
+        episode_title=str(raw.get("episodeTitle") or ""),
+        season=str(raw.get("seriesNumber") or ""),
+        episode=str(raw.get("episodeNumber") or ""),
+        channel_id=str(raw.get("channelId") or ""),
+        synopsis=str(raw.get("description") or ""),
+        start_ms=start * 1000 if 0 < start < 10**11 else start,
+        series_id=str(raw.get("seriesLinkId") or ""),
     )
 
 
@@ -373,6 +440,7 @@ class FetchTvClient:
         self._guide: Guide | None = None
         self._guide_lock = asyncio.Lock()
         self.boxes: dict[str, Box] = {}
+        self._alive_waiters: dict[str, asyncio.Event] = {}
         self.connected = False
         self.ready = asyncio.Event()
         """Set once signed in and the websocket is open."""
@@ -478,6 +546,27 @@ class FetchTvClient:
     async def request_media_state(self, terminal_id: str) -> None:
         """Ask a box to report what it is playing."""
         await self._send(terminal_id, "MEDIA_STATE", requires_stb=True)
+
+    async def refresh_recordings(self, box: Box, max_age_s: float = 60.0, timeout_s: float = 3.0) -> None:
+        """
+        Make the box's recordings reasonably fresh.
+
+        Recordings come in the box's full report (the reply to ``ARE_YOU_ALIVE``),
+        which the driver only asks for at start-up, so ask again when the last
+        one is older than ``max_age_s`` or a recording has started or ended
+        since. Waits up to ``timeout_s`` for the reply and carries on with what
+        it has if the box doesn't answer.
+        """
+        fresh = box.recordings_at and time.monotonic() - box.recordings_at < max_age_s
+        if fresh or not box.online:
+            return
+        waiter = self._alive_waiters.setdefault(box.terminal_id, asyncio.Event())
+        waiter.clear()
+        try:
+            await self._send(box.terminal_id, "ARE_YOU_ALIVE", queueable=True, paired_only=True)
+            await asyncio.wait_for(waiter.wait(), timeout_s)
+        except (NotConnectedError, asyncio.TimeoutError):
+            pass
 
     def channels_for(self, box: Box) -> list[Channel]:
         """Channels the box can play: its visible free-to-air channels, then subscriptions."""
@@ -687,6 +776,13 @@ class FetchTvClient:
 
         if msg_type == "I_AM_ALIVE":
             box.apply_alive(data)
+            waiter = self._alive_waiters.get(box.terminal_id)
+            if waiter:
+                waiter.set()
+        elif msg_type in _RECORDING_EVENTS:
+            # The report is the only place the list of recordings comes from.
+            box.recordings_at = 0.0
+            return
         elif msg_type in ("MEDIA_STATE", "NOW_PLAYING"):
             box.apply_media_state(data)
         elif msg_type in ("PAUSED", "UNPAUSED"):

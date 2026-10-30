@@ -203,6 +203,30 @@ assert browse("nope") == StatusCodes.NOT_FOUND
 assert run(Cmd.PLAY_MEDIA, {"media_id": "1850", "media_type": "channel"}) == StatusCodes.OK
 assert client.sent[-1] == ("play", TID, "1850")
 assert run(Cmd.PLAY_MEDIA, {"media_id": "nope"}) == StatusCodes.BAD_REQUEST
+
+# Recordings: a third folder, newest first, with episode details and the channel's logo.
+assert client.boxes[TID].recordings == []
+client.boxes[TID].recordings = [
+    fetchtv.Recording(id="11", title="Hard Quiz", episode_title="Series Finale", season="6",
+                      episode="12", channel_id="1850", start_ms=1_799_000_000_000),
+    fetchtv.Recording(id="12", title="The Drum", start_ms=1_799_500_000_000),
+]
+root = browse()
+assert [i.media_id for i in root.media.items] == ["fta", "subscription", "recordings"], root
+assert root.media.items[2].subtitle == "2 recordings"
+recs = browse("recordings")
+assert [i.title for i in recs.media.items] == ["The Drum", "Hard Quiz"], recs
+assert recs.pagination.count == 2
+quiz = recs.media.items[1]
+assert quiz.media_id == "recording:11" and not quiz.can_play
+assert quiz.subtitle.startswith("S6 E12 · Series Finale"), quiz.subtitle
+assert quiz.thumbnail == "https://www.fetchtv.com.au/v2/epg/channels/1850/image"
+assert recs.media.items[0].thumbnail == CHANNEL_PLACEHOLDER
+assert browse("recordings", page=2, limit=1).media.items[0].title == "Hard Quiz"
+# Recordings can be listed but not played.
+assert run(Cmd.PLAY_MEDIA, {"media_id": "recording:11"}) == StatusCodes.BAD_REQUEST
+client.boxes[TID].recordings = []
+
 client.connected = False
 assert browse() == StatusCodes.SERVICE_UNAVAILABLE
 client.connected = False

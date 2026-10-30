@@ -14,6 +14,7 @@ Each box on the account becomes one media player. What it shows:
   (visible free-to-air channels, then subscription channels) as the list.
 - **media browser**: the same channels as two folders (free to air,
   subscription), each with its logo as the thumbnail; playing one tunes the box.
+  A third folder lists the box's recordings, newest first (listing only).
 
 Each box also gets a **select** entity listing the channels, for dropdowns and
 automations.
@@ -54,7 +55,7 @@ _PREFIX = "media_player."
 _SELECT_PREFIX = "select."
 
 # Media browser folders.
-_ROOT, _FREE_TO_AIR, _SUBSCRIPTION = "root", "fta", "subscription"
+_ROOT, _FREE_TO_AIR, _SUBSCRIPTION, _RECORDINGS = "root", "fta", "subscription", "recordings"
 
 ClientGetter = Callable[[], "FetchTvClient | None"]
 
@@ -190,8 +191,9 @@ async def browse_channels(
     client: FetchTvClient, box: Box, options: BrowseOptions
 ) -> BrowseResults | StatusCodes:
     """
-    The channel browser: a root with two folders, each listing channels with
-    their logo and what is on now.
+    The media browser: a root with a folder for free-to-air channels, one for
+    subscription channels (each channel with its logo and what is on now) and
+    one for the box's recordings.
     """
     channels = client.channels_for(box)
     free = [c for c in channels if not c.subscription]
@@ -209,14 +211,15 @@ async def browse_channels(
             BrowseMediaItem(
                 media_id=folder_id,
                 title=title,
-                subtitle=f"{len(members)} channels",
+                subtitle=f"{len(members)} {noun}",
                 media_class=MediaClass.DIRECTORY,
                 can_browse=True,
-                thumbnail="icon://uc:tv",
+                thumbnail=icon,
             )
-            for folder_id, title, members in (
-                (_FREE_TO_AIR, "Free to air", free),
-                (_SUBSCRIPTION, "Subscription", subscription),
+            for folder_id, title, members, noun, icon in (
+                (_FREE_TO_AIR, "Free to air", free, "channels", "icon://uc:tv"),
+                (_SUBSCRIPTION, "Subscription", subscription, "channels", "icon://uc:tv"),
+                (_RECORDINGS, "Recordings", box.recordings, "recordings", "icon://uc:tv"),
             )
             if members
         ]
@@ -246,7 +249,40 @@ async def browse_channels(
         )
         return BrowseResults(media=folder, pagination=pagination)
 
+    if media_id == _RECORDINGS:
+        await client.refresh_recordings(box)
+        # Newest first: what you want to watch is usually what was just recorded.
+        recordings = sorted(box.recordings, key=lambda r: (r.start_ms, r.id), reverse=True)
+        shown = recordings[start:start + paging.limit]
+        logos = {c.id: c.logo for c in channels}
+        chunk = [_recording_item(r, logos.get(r.channel_id)) for r in shown]
+        pagination = Pagination(page=paging.page, limit=len(chunk), count=len(recordings))
+        folder = BrowseMediaItem(
+            media_id=_RECORDINGS,
+            title="Recordings",
+            media_class=MediaClass.DIRECTORY,
+            can_browse=True,
+            items=chunk,
+        )
+        return BrowseResults(media=folder, pagination=pagination)
+
     return StatusCodes.NOT_FOUND
+
+
+def _recording_item(recording: fetchtv.Recording, logo: str | None) -> BrowseMediaItem:
+    """A recording as a list entry. Listed only: the box can't be told to play one yet."""
+    when = ""
+    if recording.start_ms:
+        when = datetime.fromtimestamp(recording.start_ms / 1000, timezone.utc).astimezone().strftime("%a %d %b")
+    subtitle = " · ".join(part for part in (recording.label, when) if part) or None
+    return BrowseMediaItem(
+        media_id=f"recording:{recording.id}",
+        title=recording.title,
+        subtitle=subtitle,
+        media_class=MediaClass.EPISODE if recording.episode else MediaClass.VIDEO,
+        media_type=MediaContentType.EPISODE if recording.episode else MediaContentType.VIDEO,
+        thumbnail=logo or CHANNEL_PLACEHOLDER,
+    )
 
 
 def _channel_item(channel: fetchtv.Channel, program: Program | None) -> BrowseMediaItem:

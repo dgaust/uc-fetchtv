@@ -44,6 +44,24 @@ async def main():
     assert bedroom.channel_id == "2319"
     assert None in updates and lounge in updates
 
+    # Recordings arrive in the full report; the one pending deletion is dropped,
+    # and a time in milliseconds is kept as is.
+    assert [(r.title, r.label) for r in lounge.recordings] == [
+        ("Hard Quiz", "S6 E12 · Series Finale"), ("The Drum", "")], lounge.recordings
+    assert lounge.recordings[0].start_ms == 1_799_000_000_000
+    assert fetchtv._recording({"id": 1, "name": "X", "programStartDate": 1_799_000_000}).start_ms == 1_799_000_000_000
+
+    # A recording event marks them stale; refreshing asks the box again, once
+    # (a fresh list is left alone).
+    asks = lambda: len([m for m in fake.ws_received if m["message"]["type"] == "ARE_YOU_ALIVE" and m["to"] == LOUNGE])
+    before = asks()
+    await client.refresh_recordings(lounge)
+    assert asks() == before, "fresh list not re-requested"
+    lounge.recordings_at = 0.0
+    lounge.recordings = []
+    await client.refresh_recordings(lounge)
+    assert asks() == before + 1 and len(lounge.recordings) == 2, "stale list re-requested"
+
     # Channel list: visible free-to-air channels (hidden one dropped), then
     # subscribed subscription channels only.
     labels = [c.label for c in client.channels_for(lounge)]

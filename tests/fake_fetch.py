@@ -49,6 +49,16 @@ FTA = [
     {"id": "30999999", "epg_id": 999999, "name": "Hidden Channel", "number": 99},
 ]
 
+# Recordings as the box reports them in I_AM_ALIVE (times in epoch ms).
+RECORDINGS = [
+    {"id": 11, "diskId": 11, "name": "Hard Quiz", "episodeTitle": "Series Finale", "seriesNumber": 6,
+     "episodeNumber": 12, "channelId": "30411316", "programStartDate": 1_799_000_000_000},
+    {"id": 12, "diskId": 12, "name": "The Drum", "channelId": "30018294",
+     "programStartDate": 1_799_500_000_000},
+    {"id": 13, "diskId": 13, "name": "Deleted One", "pendingDelete": True,
+     "programStartDate": 1_799_600_000_000},
+]
+
 PROGRAM_FIELDS = ["id", "title", "start", "end", "synopsis_id", "rating", "warnings", "flags",
                   "genre", "series_link", "episode_title"]
 
@@ -218,6 +228,7 @@ class FakeFetch:
 
         if typ == "ARE_YOU_ALIVE":
             await reply("I_AM_ALIVE", {**self._settings(tid), "state": box["media"], "ftaChannels": FTA,
+                                       "recordings": RECORDINGS,
                                        "sysInfo": {"label": box["label"], "hardwareName": "Mighty"}})
         elif typ == "MEDIA_STATE":
             await reply("MEDIA_STATE", {"settings": self._settings(tid),
