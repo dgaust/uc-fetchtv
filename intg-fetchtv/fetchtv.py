@@ -84,6 +84,9 @@ WAKE_POLL_S = 1.5
 MAX_TYPED_CHARS = 64
 TYPE_DELAY_S = 0.15
 WS_OPEN_TIMEOUT_S = 15.0
+# A box with thousands of recordings sends a full report of several megabytes;
+# the websockets default of 1 MiB would close the connection on it, every time.
+WS_MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 # How often each box is pinged and asked for its state. The box pushes changes
 # on its own, but not reliably when it goes into or out of standby.
 POLL_INTERVAL_S = 60.0
@@ -925,6 +928,7 @@ class FetchTvClient:
             user_agent_header=None,
             open_timeout=WS_OPEN_TIMEOUT_S,
             ping_interval=30,
+            max_size=WS_MAX_MESSAGE_BYTES,
         ) as ws:
             self._ws = ws
             await self._set_connected(True)
