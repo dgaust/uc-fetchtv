@@ -525,6 +525,8 @@ class FetchTvClient:
         self.boxes: dict[str, Box] = {}
         self._alive_waiters: dict[str, asyncio.Event] = {}
         self._tasks: set[asyncio.Task] = set()
+        # Plays waiting for a box in standby to wake, per box, in the order asked.
+        self._pending_plays: dict[str, list[tuple[str, dict[str, Any]]]] = {}
         self.connected = False
         self.ready = asyncio.Event()
         """Set once signed in and the websocket is open."""
@@ -632,7 +634,7 @@ class FetchTvClient:
         """Type a character (used for channel number digits)."""
         await self._send(terminal_id, "KEYCODE", requires_stb=True, extra={"keyCode": ord(char[0])})
 
-    async def wake(self, terminal_id: str, timeout_s: float = WAKE_TIMEOUT_S) -> bool:
+    async def wake(self, terminal_id: str, timeout_s: float | None = None) -> bool:
         """
         Wake a box from standby and wait for it to say it is awake.
 
@@ -645,7 +647,7 @@ class FetchTvClient:
         if box is None or box.standby is not True:
             return True
         await self._send(terminal_id, "WAKE_STB", requires_stb=True)
-        deadline = time.monotonic() + timeout_s
+        deadline = time.monotonic() + (WAKE_TIMEOUT_S if timeout_s is None else timeout_s)
         while time.monotonic() < deadline:
             await asyncio.sleep(WAKE_POLL_S)
             if box.standby is not True:
@@ -661,23 +663,40 @@ class FetchTvClient:
         awake. That wait can take many seconds, longer than the Remote waits for
         a command's reply, so it runs in the background and this returns at once.
         """
+        queue = self._pending_plays.get(terminal_id)
+        if queue is not None:
+            # The box is already being woken: line up behind what is waiting, so
+            # the plays go out in the order they were asked for.
+            queue.append((msg_type, extra))
+            return
         box = self.boxes.get(terminal_id)
         if box is None or box.standby is not True:
             await self._send(terminal_id, msg_type, requires_stb=True, extra=extra)
             return
-        task = asyncio.create_task(self._wake_then_send(terminal_id, msg_type, extra))
+        self._pending_plays[terminal_id] = [(msg_type, extra)]
+        task = asyncio.create_task(self._wake_then_send(terminal_id))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def _wake_then_send(self, terminal_id: str, msg_type: str, extra: dict[str, Any]) -> None:
+    async def _wake_then_send(self, terminal_id: str) -> None:
+        queue = self._pending_plays[terminal_id]
         try:
             if not await self.wake(terminal_id):
-                _LOG.warning("%s did not wake up in time; sending %s anyway", terminal_id, msg_type)
-            await self._send(terminal_id, msg_type, requires_stb=True, extra=extra)
+                _LOG.warning("%s did not wake up in time; sending what is waiting anyway", terminal_id)
+            while queue:
+                msg_type, extra = queue.pop(0)
+                try:
+                    await self._send(terminal_id, msg_type, requires_stb=True, extra=extra)
+                except NotConnectedError:
+                    _LOG.debug("Not connected: dropped %s for %s", msg_type, terminal_id)
+                    queue.clear()
+                except Exception:  # a failed background send must not go unnoticed
+                    _LOG.exception("Could not send %s to %s after waking it", msg_type, terminal_id)
         except NotConnectedError:
-            _LOG.debug("Not connected: dropped %s for %s", msg_type, terminal_id)
-        except Exception:  # a failed background send must not go unnoticed
-            _LOG.exception("Could not send %s to %s after waking it", msg_type, terminal_id)
+            _LOG.debug("Not connected: dropped the plays waiting for %s", terminal_id)
+        finally:
+            # No await between the loop's last look at the queue and this.
+            self._pending_plays.pop(terminal_id, None)
 
     async def play_channel(self, terminal_id: str, channel_id: str) -> None:
         """Tune a box to a channel id (as listed in ``channels_for``), waking it first if needed."""
