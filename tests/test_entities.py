@@ -58,6 +58,13 @@ class FakeClient(fetchtv.FetchTvClient):
     async def play_recording(self, terminal_id, recording_id):
         self.sent.append(("recording", terminal_id, recording_id))
 
+    async def set_volume(self, terminal_id, level):
+        self.sent.append(("volume", terminal_id, max(0, min(100, level))))
+
+    async def start_over_current(self, box):
+        self.sent.append(("start_over", box.terminal_id))
+        return bool(box.channel_id)
+
 
 def make_box(**kw) -> Box:
     box = Box(terminal_id=TID, name="Lounge", online=True, standby=False)
@@ -117,6 +124,28 @@ assert entity.id == ent.entity_id(TID) and ent.terminal_id_from_entity(entity.id
 
 def run(cmd, params=None):
     return asyncio.run(entity.command(cmd, params, websocket=None))
+
+
+# Volume: attributes follow the box, and the commands set or step it.
+from ucapi.media_player import Features as Feat  # noqa: E402
+assert Feat.VOLUME in ent.FEATURES and Feat.VOLUME_UP_DOWN in ent.FEATURES
+assert Attr.VOLUME not in ent.attributes(client, make_box(), None, NOW), "unknown until the box says"
+vol_box = make_box(volume=30, muted=False)
+a = ent.attributes(client, vol_box, None, NOW)
+assert a[Attr.VOLUME] == 30 and a[Attr.MUTED] is False, a
+assert run(Cmd.VOLUME, {"volume": 45}) == StatusCodes.OK and client.sent[-1] == ("volume", TID, 45)
+assert run(Cmd.VOLUME, {"volume": "x"}) == StatusCodes.BAD_REQUEST
+box.volume = 30
+assert run(Cmd.VOLUME_UP) == StatusCodes.OK and client.sent[-1] == ("volume", TID, 35)
+assert run(Cmd.VOLUME_DOWN) == StatusCodes.OK and client.sent[-1] == ("volume", TID, 25)
+box.volume = None
+
+# Start over is a simple command; it needs something on a channel to restart.
+assert "START_OVER" in entity.options["simple_commands"]
+assert run("START_OVER") == StatusCodes.OK and client.sent[-1] == ("start_over", TID)
+box.channel_id = ""
+assert run("START_OVER") == StatusCodes.SERVICE_UNAVAILABLE
+box.channel_id = "30411316"
 
 
 assert run(Cmd.CURSOR_UP) == StatusCodes.OK and client.sent[-1] == ("key", TID, "KEY_UP")
@@ -255,6 +284,35 @@ assert browse("recordings", page=2, limit=1).media.items[0].title == "Hard Quiz"
 assert run(Cmd.PLAY_MEDIA, {"media_id": "recording:11", "media_type": "episode"}) == StatusCodes.OK
 assert client.sent[-1] == ("recording", TID, "11"), client.sent[-1]
 assert run(Cmd.PLAY_MEDIA, {"media_id": "recording:999"}) == StatusCodes.BAD_REQUEST
+client.boxes[TID].recordings = []
+
+# Series with several recordings become folders; other recordings stay on their own.
+Rec = fetchtv.Recording
+client.boxes[TID].recordings = [
+    Rec(id="1", title="Dirty Jobs", season="5", episode="16", series_id="S1", start_ms=1_000, channel_id="1850"),
+    Rec(id="2", title="Dirty Jobs", season="5", episode="18", series_id="S1", start_ms=3_000, channel_id="1850"),
+    Rec(id="3", title="Dirty Jobs", season="5", episode="17", series_id="S1", start_ms=2_000, channel_id="1850"),
+    Rec(id="4", title="A Film", start_ms=2_500),
+    Rec(id="5", title="One Episode Show", series_id="S2", start_ms=1_500),
+    Rec(id="6", title="Other Series", series_id="S3", start_ms=500),
+    Rec(id="7", title="Other Series", series_id="S3", start_ms=600),
+]
+folder = browse("recordings")
+kinds = [(i.media_id, i.can_browse, i.title) for i in folder.media.items]
+assert kinds == [
+    ("series:S1", True, "Dirty Jobs"),          # newest recording 3_000
+    ("recording:4", None, "A Film"),            # 2_500
+    ("recording:5", None, "One Episode Show"),  # a series of one is just the recording
+    ("series:S3", True, "Other Series"),        # newest 600
+], kinds
+assert folder.pagination.count == 4
+assert folder.media.items[0].subtitle == "3 recordings"
+assert folder.media.items[0].thumbnail == "https://www.fetchtv.com.au/v2/epg/channels/1850/image"
+eps = browse("series:S1")
+assert [i.media_id for i in eps.media.items] == ["recording:2", "recording:3", "recording:1"], eps
+assert eps.media.title == "Dirty Jobs" and eps.pagination.count == 3 and eps.media.items[0].can_play
+assert browse("series:S1", page=2, limit=2).media.items[0].media_id == "recording:1"
+assert browse("series:nope") == StatusCodes.NOT_FOUND
 client.boxes[TID].recordings = []
 
 client.connected = False

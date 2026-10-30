@@ -67,9 +67,13 @@ KEYS = {
 }
 DIGITS = {f"DIGIT_{n}": str(n) for n in range(10)}
 CHANNEL_STEPS = {"CHANNEL_UP": 1, "CHANNEL_DOWN": -1}
+VOLUME_STEPS = {"VOLUME_UP": 5, "VOLUME_DOWN": -5}
+START_OVER = "START_OVER"
+# send_cmd with free text "TYPE:hello" types the text into the box (search boxes etc.).
+TYPE_PREFIX = "TYPE:"
 
 # Every command the remote offers (the Remote's configurator lists these).
-SIMPLE_COMMANDS = [*KEYS, *DIGITS, *CHANNEL_STEPS]
+SIMPLE_COMMANDS = [*KEYS, *DIGITS, *CHANNEL_STEPS, *VOLUME_STEPS, START_OVER]
 
 # Pauses the box needs between key presses, in ms, when the Remote gives none.
 DEFAULT_REPEAT_DELAY_MS = 150
@@ -114,8 +118,11 @@ def _pages() -> list[UiPage]:
     The keys the buttons above don't cover, in two pages sized to fit.
 
     - **Numbers**: the number pad (three columns) and Text.
-    - **Keys**: the four colour keys (the Remote 3 has no colour buttons), and
-      Info and Exit.
+    - **Keys**: the four colour keys (the Remote 3 has no colour buttons),
+      Info and Exit, and Start over (restart the programme on now).
+
+    VOLUME_UP and VOLUME_DOWN are offered as commands for activities but not
+    placed: the Remote 3's volume buttons normally control the TV or amplifier.
     """
     def text(label: str, cmd: str, x: int, y: int) -> UiItem:
         return create_ui_text(label, x, y, None, cmd)
@@ -124,9 +131,10 @@ def _pages() -> list[UiPage]:
         *(text(str(n), f"DIGIT_{n}", (n - 1) % 3, (n - 1) // 3) for n in range(1, 10)),
         text("Text", "TEXT", 0, 3), text("0", "DIGIT_0", 1, 3),
     ])
-    keys = UiPage("keys", "Keys", grid=Size(3, 2), items=[
+    keys = UiPage("keys", "Keys", grid=Size(3, 3), items=[
         text("Red", "RED", 0, 0), text("Green", "GREEN", 1, 0), text("Yellow", "YELLOW", 2, 0),
         text("Blue", "BLUE", 0, 1), text("Info", "INFO", 1, 1), text("Exit", "EXIT", 2, 1),
+        create_ui_text("Start over", 0, 2, Size(3, 1), START_OVER),
     ])
     return [numbers, keys]
 
@@ -170,7 +178,11 @@ def _make_handler(terminal_id: str, get_client: ClientGetter):
 
 
 def _valid(command: Any) -> bool:
-    return command in KEYS or command in DIGITS or command in CHANNEL_STEPS
+    return command in SIMPLE_COMMANDS
+
+
+def _is_typing(command: Any) -> bool:
+    return isinstance(command, str) and command.startswith(TYPE_PREFIX)
 
 
 def _count(value: Any, default: int) -> int:
@@ -228,6 +240,13 @@ async def _run(client: FetchTvClient, box: Box, cmd_id: str, params: dict[str, A
     if cmd_id == Commands.SEND_CMD and _is_experiment(params.get("command")):
         return await _experiment(client, box, str(params["command"]))
 
+    if cmd_id == Commands.SEND_CMD and _is_typing(params.get("command")):
+        text = params["command"][len(TYPE_PREFIX):]
+        if not text or len(text) > fetchtv.MAX_TYPED_CHARS or not (text.isascii() and text.isprintable()):
+            return StatusCodes.BAD_REQUEST
+        await client.type_text(box.terminal_id, text)
+        return StatusCodes.OK
+
     if cmd_id == Commands.SEND_CMD:
         sequence = [params.get("command")]
         repeat = _count(params.get("repeat"), 1)
@@ -247,26 +266,32 @@ async def _run(client: FetchTvClient, box: Box, cmd_id: str, params: dict[str, A
     # Each command is repeated in turn, as the Remote's send_cmd_sequence defines.
     presses = [c for c in sequence for _ in range(repeat)]
     tuned: list[fetchtv.Channel] = []
+    done = True
     for i, command in enumerate(presses):
         if i:
             await asyncio.sleep(delay)
-        await _press(client, box, command, tuned)
-    return StatusCodes.OK
+        done = await _press(client, box, command, tuned) and done
+    return StatusCodes.OK if done else StatusCodes.SERVICE_UNAVAILABLE
 
 
 async def _press(
     client: FetchTvClient, box: Box, command: str, tuned: list[fetchtv.Channel]
-) -> None:
+) -> bool:
+    """Do one command. False if it couldn't be done (there was nothing to act on)."""
     if command in KEYS:
         await client.send_key(box.terminal_id, KEYS[command])
     elif command in DIGITS:
         await client.send_keycode(box.terminal_id, DIGITS[command])
+    elif command == START_OVER:
+        return await client.start_over_current(box)
+    elif command in VOLUME_STEPS:
+        await client.set_volume(box.terminal_id, (box.volume or 0) + VOLUME_STEPS[command])
     else:
         # Step from the channel this command last tuned: the box's own report
         # lags behind, so repeated presses would otherwise all pick the same one.
         channels = client.channels_for(box)
         if not channels:
-            return
+            return False
         current = tuned[-1] if tuned else client.current_channel(box)
         ids = [c.id for c in channels]
         if current is None or current.id not in ids:
@@ -275,3 +300,4 @@ async def _press(
             channel = channels[(ids.index(current.id) + CHANNEL_STEPS[command]) % len(channels)]
         await client.play_channel(box.terminal_id, channel.id)
         tuned.append(channel)
+    return True

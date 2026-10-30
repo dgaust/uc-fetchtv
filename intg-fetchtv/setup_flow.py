@@ -25,6 +25,7 @@ import config
 import entities as ent
 import fetchtv
 import remote_entity
+import sensors
 from shared import api
 
 _LOG = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ async def _handle_setup(msg: DriverSetupRequest) -> SetupAction:
     # Drop entities of boxes no longer on the account (e.g. a different account).
     ids = (ent.entity_id, ent.select_entity_id, remote_entity.entity_id)
     keep = {f(b.terminal_id) for b in boxes for f in ids}
+    keep |= {eid for b in boxes for eid in sensors.entity_ids(b.terminal_id)}
     for entity in list(api.available_entities.get_all()):
         if entity["entity_id"] not in keep:
             api.available_entities.remove(entity["entity_id"])

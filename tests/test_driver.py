@@ -22,6 +22,7 @@ import config  # noqa: E402
 import driver  # noqa: E402
 import entities as ent  # noqa: E402
 import remote_entity  # noqa: E402
+import sensors  # noqa: E402
 import websockets  # noqa: E402
 from fake_fetch import ACTIVATION_CODE, BEDROOM, LOUNGE, PIN, FakeFetch  # noqa: E402
 from shared import api  # noqa: E402
@@ -94,7 +95,9 @@ async def main():
         await wait_event(lambda e: e["msg"] == "driver_setup_change" and e["msg_data"].get("state") == "OK")
         resp = await request("get_available_entities")
         found = {x["entity_id"]: x for x in resp["msg_data"]["available_entities"]}
-        assert set(found) == {LOUNGE_ID, BEDROOM_ID, LOUNGE_SEL, BEDROOM_SEL, LOUNGE_REM, BEDROOM_REM}, found
+        sensor_ids = {i for t in (LOUNGE, BEDROOM) for i in sensors.entity_ids(t)}
+        assert len(sensor_ids) == 6
+        assert set(found) == {LOUNGE_ID, BEDROOM_ID, LOUNGE_SEL, BEDROOM_SEL, LOUNGE_REM, BEDROOM_REM} | sensor_ids, found
         assert found[LOUNGE_REM]["name"] == {"en": "Lounge remote"}
         assert "GUIDE" in found[LOUNGE_REM]["options"]["simple_commands"]
         assert len(found[LOUNGE_REM]["options"]["user_interface"]["pages"]) == 2

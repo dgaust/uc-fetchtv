@@ -86,6 +86,12 @@ _RECORDING_EVENTS = frozenset({
 })
 
 HTTP_TIMEOUT_S = 20.0
+# Waking a box: how long to wait for it to report it is awake, and how often to ask.
+WAKE_TIMEOUT_S = 20.0
+WAKE_POLL_S = 1.5
+# Typing text into a box: a cap, and the pause between key codes.
+MAX_TYPED_CHARS = 64
+TYPE_DELAY_S = 0.15
 WS_OPEN_TIMEOUT_S = 15.0
 # How often each box is pinged and asked for its state. The box pushes changes
 # on its own, but not reliably when it goes into or out of standby.
@@ -171,6 +177,8 @@ class Program:
     episode_title: str = ""
     genre: str = ""
     synopsis: str = ""
+    program_id: str = ""
+    """The guide's id for the programme, which the box accepts for start over."""
 
     def covers(self, at_ms: int) -> bool:
         """True if the programme is on air at ``at_ms``."""
@@ -231,6 +239,11 @@ class Box:
     # Monotonic time of the last full box report, which carries the recordings;
     # 0 when they may be out of date (a recording started or ended).
     recordings_at: float = 0.0
+    volume: int | None = None
+    muted: bool | None = None
+    scheduled_count: int = 0
+    active_recording_ids: list[str] = field(default_factory=list)
+    storage_info: Any = None
 
     @property
     def has_state(self) -> bool:
@@ -250,6 +263,21 @@ class Box:
             r for r in (_recording(raw) for raw in data.get("recordings") or []) if r
         ]
         self.recordings_at = time.monotonic()
+        self.scheduled_count = len(data.get("currentFutureRecordings") or [])
+        self.active_recording_ids = [str(i) for i in data.get("activeRecordings") or []]
+        self.storage_info = data.get("storageInfo")
+        _LOG.debug(
+            "%s: volume %s mute %s bt %s/%s output %s, storage %s, %d scheduled, active %s",
+            self.name,
+            data.get("volume"),
+            data.get("mute"),
+            data.get("btVolume"),
+            data.get("btMute"),
+            data.get("volumeOuput"),
+            self.storage_info,
+            self.scheduled_count,
+            self.active_recording_ids,
+        )
         _LOG.debug(
             "%s: %d recordings; report keys %s; first recording %s",
             self.name,
@@ -285,6 +313,10 @@ class Box:
     def _apply_settings(self, data: dict[str, Any]) -> None:
         if "standby" in data:
             self.standby = bool(data["standby"])
+        if isinstance(data.get("volume"), (int, float)):
+            self.volume = int(data["volume"])
+        if "mute" in data:
+            self.muted = bool(data["mute"])
         if data.get("ipAddress"):
             self.ip_address = data["ipAddress"]
         if "hiddenChannels" in data:
@@ -428,7 +460,7 @@ def parse_programs(response: dict[str, Any]) -> dict[str, list[Program]]:
 
     i_title, i_start, i_end = index("title"), index("start"), index("end")
     i_episode, i_genre = index("episode_title"), index("genre")
-    i_synopsis = index("synopsis_id")
+    i_synopsis, i_id = index("synopsis_id"), index("id")
     synopses = response.get("synopses") or {}
     if i_title is None or i_start is None or i_end is None:
         return {}
@@ -446,6 +478,7 @@ def parse_programs(response: dict[str, Any]) -> dict[str, list[Program]]:
                 episode_title=str(get(row, i_episode) or ""),
                 genre=str(get(row, i_genre) or ""),
                 synopsis=str(synopses.get(str(get(row, i_synopsis)), "")),
+                program_id=str(get(row, i_id) or ""),
             )
             for row in rows
         ]
@@ -484,6 +517,7 @@ class FetchTvClient:
         self._guide_lock = asyncio.Lock()
         self.boxes: dict[str, Box] = {}
         self._alive_waiters: dict[str, asyncio.Event] = {}
+        self._tasks: set[asyncio.Task] = set()
         self.connected = False
         self.ready = asyncio.Event()
         """Set once signed in and the websocket is open."""
@@ -565,6 +599,8 @@ class FetchTvClient:
     async def stop(self) -> None:
         """Disconnect and stop reconnecting."""
         self._running = False
+        for task in list(self._tasks):
+            task.cancel()
         ws = self._ws
         if ws is not None:
             await ws.close()
@@ -580,24 +616,117 @@ class FetchTvClient:
         """Type a character (used for channel number digits)."""
         await self._send(terminal_id, "KEYCODE", requires_stb=True, extra={"keyCode": ord(char[0])})
 
+    async def wake(self, terminal_id: str, timeout_s: float = WAKE_TIMEOUT_S) -> bool:
+        """
+        Wake a box from standby and wait for it to say it is awake.
+
+        The Fetch app does the same before it plays anything on a box in
+        standby: ``WAKE_STB``, then it sends the play once the box reports it
+        is awake. Returns False if the box is still in standby after
+        ``timeout_s``. Does nothing if the box is not known to be in standby.
+        """
+        box = self.boxes.get(terminal_id)
+        if box is None or box.standby is not True:
+            return True
+        await self._send(terminal_id, "WAKE_STB", requires_stb=True)
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            await asyncio.sleep(WAKE_POLL_S)
+            if box.standby is not True:
+                return True
+            await self.request_media_state(terminal_id)
+        return False
+
+    async def _play(self, terminal_id: str, msg_type: str, extra: dict[str, Any]) -> None:
+        """
+        Send a message that starts something playing.
+
+        A box in standby is woken first, and the message goes out once it is
+        awake. That wait can take many seconds, longer than the Remote waits for
+        a command's reply, so it runs in the background and this returns at once.
+        """
+        box = self.boxes.get(terminal_id)
+        if box is None or box.standby is not True:
+            await self._send(terminal_id, msg_type, requires_stb=True, extra=extra)
+            return
+        task = asyncio.create_task(self._wake_then_send(terminal_id, msg_type, extra))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _wake_then_send(self, terminal_id: str, msg_type: str, extra: dict[str, Any]) -> None:
+        try:
+            if not await self.wake(terminal_id):
+                _LOG.warning("%s did not wake up in time; sending %s anyway", terminal_id, msg_type)
+            await self._send(terminal_id, msg_type, requires_stb=True, extra=extra)
+        except NotConnectedError:
+            _LOG.debug("Not connected: dropped %s for %s", msg_type, terminal_id)
+        except Exception:  # a failed background send must not go unnoticed
+            _LOG.exception("Could not send %s to %s after waking it", msg_type, terminal_id)
+
     async def play_channel(self, terminal_id: str, channel_id: str) -> None:
-        """Tune a box to a channel id (as listed in ``channels_for``)."""
-        await self._send(
-            terminal_id, "PLAY_CHANNEL", requires_stb=True, extra={"channelId": int(channel_id)}
+        """Tune a box to a channel id (as listed in ``channels_for``), waking it first if needed."""
+        await self._play(terminal_id, "PLAY_CHANNEL", {"channelId": int(channel_id)})
+
+    async def start_over(self, terminal_id: str, channel_id: str, program_id: str) -> None:
+        """
+        Restart the programme that is on a channel from its beginning, as the
+        Fetch app's "start over": ``PLAY_ASSET`` with asset type ``START_OVER``.
+        """
+        await self._play(
+            terminal_id,
+            "PLAY_ASSET",
+            {"assetType": "START_OVER", "channelId": str(channel_id), "programId": str(program_id)},
         )
+
+    async def start_over_current(self, box: Box) -> bool:
+        """
+        Start over the programme that is on the box's current channel.
+
+        Returns False if there is no known programme (not on a channel the guide
+        knows, or the guide has no id for it) so there is nothing to start over.
+        """
+        program = self.cached_program(box) or await self.refresh_program(box)
+        if program is None or not program.program_id or not box.channel_id:
+            return False
+        await self.start_over(box.terminal_id, box.channel_id, program.program_id)
+        return True
+
+    async def set_volume(self, terminal_id: str, level: int) -> None:
+        """Set the box's volume (``SET_VOLUME``, 0 to 100 as on the app's slider)."""
+        level = max(0, min(100, int(level)))
+        await self._send(terminal_id, "SET_VOLUME", requires_stb=True, extra={"volume": level})
+        box = self.boxes.get(terminal_id)
+        if box is not None:
+            box.volume = level
+
+    async def type_text(self, terminal_id: str, text: str) -> None:
+        """
+        Type text into the box one key code at a time, as the app's keyboard does.
+
+        The characters go out in the background, a short pause apart, so this
+        returns at once rather than after the whole text has been sent.
+        """
+        task = asyncio.create_task(self._type_chars(terminal_id, text[:MAX_TYPED_CHARS]))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _type_chars(self, terminal_id: str, text: str) -> None:
+        try:
+            for char in text:
+                await self.send_keycode(terminal_id, char)
+                await asyncio.sleep(TYPE_DELAY_S)
+        except NotConnectedError:
+            _LOG.debug("Not connected: stopped typing to %s", terminal_id)
 
     async def play_recording(self, terminal_id: str, recording_id: str) -> None:
         """
-        Play one of a box's recordings on it.
+        Play one of a box's recordings on it, waking it first if needed.
 
         The message is the one the Fetch Android app sends: ``PLAY_ASSET`` with
         an asset type and the recording's id, which is a string in the JSON.
         """
-        await self._send(
-            terminal_id,
-            "PLAY_ASSET",
-            requires_stb=True,
-            extra={"assetType": "RECORDING", "recordingId": str(recording_id)},
+        await self._play(
+            terminal_id, "PLAY_ASSET", {"assetType": "RECORDING", "recordingId": str(recording_id)}
         )
 
     async def send_raw(self, terminal_id: str, msg_type: str, extra: dict[str, Any]) -> None:
@@ -846,6 +975,11 @@ class FetchTvClient:
             waiter = self._alive_waiters.get(box.terminal_id)
             if waiter:
                 waiter.set()
+        elif msg_type == "VOLUME_SET":
+            if isinstance(data.get("current"), (int, float)):
+                box.volume = int(data["current"])
+            if "mute" in data:
+                box.muted = bool(data["mute"])
         elif msg_type in _RECORDING_EVENTS:
             # The report is the only place the list of recordings comes from.
             box.recordings_at = 0.0

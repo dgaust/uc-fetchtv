@@ -202,7 +202,8 @@ class FakeFetch:
 
     def _settings(self, tid: str) -> dict:
         box = self.boxes[tid]
-        return {"standby": box["standby"], "ipAddress": "10.0.0.2", "hiddenChannels": [30999999]}
+        return {"standby": box["standby"], "ipAddress": "10.0.0.2", "hiddenChannels": [30999999],
+                "volume": box.get("volume", 12), "mute": box.get("mute", False)}
 
     async def _ws_handler(self, ws) -> None:
         self.ws_headers.append(dict(ws.request.headers.items()))
@@ -235,6 +236,8 @@ class FakeFetch:
         if typ == "ARE_YOU_ALIVE":
             await reply("I_AM_ALIVE", {**self._settings(tid), "state": box["media"], "ftaChannels": FTA,
                                        "recordings": RECORDINGS,
+                                       "currentFutureRecordings": [{"id": 1}, {"id": 2}],
+                                       "activeRecordings": [11],
                                        "sysInfo": {"label": box["label"], "hardwareName": "Mighty"}})
         elif typ == "MEDIA_STATE":
             await reply("MEDIA_STATE", {"settings": self._settings(tid),
@@ -252,5 +255,12 @@ class FakeFetch:
             await reply("NOW_PLAYING", {"currentPlaybackMedia": box["media"]})
             await reply("CHANNEL_CHANGED", {})
             await reply("PLAYBACK_STOPPED", {})
+        elif typ == "WAKE_STB":
+            box["standby"] = False
+            await reply("MEDIA_STATE", {"settings": self._settings(tid),
+                                        "currentPlaybackMedia": box["media"]})
+        elif typ == "SET_VOLUME":
+            box["volume"] = msg["message"]["volume"]
+            await reply("VOLUME_SET", {"current": box["volume"], "mute": box.get("mute", False)})
         elif typ == "KEYEVENT" and msg["message"].get("keyName") == "KEY_POWER":
             box["standby"] = not box["standby"]

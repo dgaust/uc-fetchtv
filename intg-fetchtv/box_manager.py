@@ -24,6 +24,7 @@ import config
 import entities as ent
 import fetchtv
 import remote_entity
+import sensors
 from shared import api, loop
 
 _LOG = logging.getLogger(__name__)
@@ -191,6 +192,9 @@ def _ensure_entity(terminal_id: str, name: str) -> None:
         api.available_entities.add(ent.build_select(terminal_id, name, get_client))
     if not api.available_entities.contains(remote_entity.entity_id(terminal_id)):
         api.available_entities.add(remote_entity.build_remote(terminal_id, name, get_client))
+    for sensor in sensors.build_sensors(terminal_id, name):
+        if not api.available_entities.contains(sensor.id):
+            api.available_entities.add(sensor)
 
 
 def _push_box(box: fetchtv.Box) -> None:
@@ -200,6 +204,8 @@ def _push_box(box: fetchtv.Box) -> None:
     _push_entity(ent.entity_id(box.terminal_id), ent.attributes(client, box, program, now_ms))
     _push_entity(ent.select_entity_id(box.terminal_id), ent.select_attributes(client, box))
     _push_entity(remote_entity.entity_id(box.terminal_id), remote_entity.attributes(client, box))
+    for eid, attrs in sensors.attributes(client, box).items():
+        _push_entity(eid, attrs)
 
 
 def _push_entity(eid: str, attrs: dict[str, Any]) -> None:

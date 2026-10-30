@@ -143,12 +143,65 @@ async def main():
     assert sent["assetType"] == "RECORDING" and sent["recordingId"] == "11", sent
     assert sent["requiresSetTopBox"] is True
 
+    # The full report carries the volume, and what the sensors show.
+    assert lounge.volume == 12 and lounge.muted is False
+    assert lounge.scheduled_count == 2 and lounge.active_recording_ids == ["11"]
+
+    # Volume: SET_VOLUME (clamped to 0..100), and the box's VOLUME_SET event updates state.
+    await client.set_volume(LOUNGE, 40)
+    await wait_for(lambda: fake.received("SET_VOLUME", LOUNGE))
+    assert fake.received("SET_VOLUME", LOUNGE)[-1]["message"]["volume"] == 40
+    await client.set_volume(LOUNGE, 250)
+    await wait_for(lambda: len(fake.received("SET_VOLUME", LOUNGE)) == 2)
+    assert fake.received("SET_VOLUME", LOUNGE)[-1]["message"]["volume"] == 100
+    await fake.push(LOUNGE, "VOLUME_SET", {"current": 33, "mute": True})
+    await wait_for(lambda: lounge.volume == 33 and lounge.muted is True)
+
+    # Start over: PLAY_ASSET with the START_OVER asset type, the channel and programme ids.
+    await client.start_over(LOUNGE, "30411316", "777")
+    await wait_for(lambda: [m for m in fake.received("PLAY_ASSET", LOUNGE)
+                            if m["message"].get("assetType") == "START_OVER"])
+    sent = [m for m in fake.received("PLAY_ASSET", LOUNGE) if m["message"]["assetType"] == "START_OVER"][-1]["message"]
+    assert sent["channelId"] == "30411316" and sent["programId"] == "777", sent
+    lounge.channel_id = "30411316"
+    assert await client.start_over_current(lounge) is True
+    await wait_for(lambda: len([m for m in fake.received("PLAY_ASSET", LOUNGE)
+                                if m["message"].get("assetType") == "START_OVER"]) == 2)
+    started = [m for m in fake.received("PLAY_ASSET", LOUNGE) if m["message"]["assetType"] == "START_OVER"][-1]["message"]
+    assert started["programId"] and started["programId"] != "777", "the programme's guide id is used"
+    lounge.channel_id = ""
+    assert await client.start_over_current(lounge) is False, "nothing on, nothing to start over"
+
+    # Typing text: one KEYCODE per character, in the background.
+    await client.type_text(LOUNGE, "hi")
+    await wait_for(lambda: len(fake.received("KEYCODE", LOUNGE)) >= 2)
+    assert [m["message"]["keyCode"] for m in fake.received("KEYCODE", LOUNGE)[-2:]] == [ord("h"), ord("i")]
+    assert fetchtv.MAX_TYPED_CHARS == 64
+
+    # A box in standby is woken first, and the play goes out once it is awake -
+    # without making the caller wait for that.
+    assert bedroom.standby is True
+    wakes = len(fake.received("WAKE_STB", BEDROOM))
+    await client.play_channel(BEDROOM, "1850")
+    await wait_for(lambda: len(fake.received("WAKE_STB", BEDROOM)) == wakes + 1)
+    await wait_for(lambda: fake.received("PLAY_CHANNEL", BEDROOM))
+    assert bedroom.standby is False
+    order = [m["message"]["type"] for m in fake.ws_received
+             if m["to"] == BEDROOM and m["message"]["type"] in ("WAKE_STB", "PLAY_CHANNEL")]
+    assert order == ["WAKE_STB", "PLAY_CHANNEL"], order
+    # An awake box gets no wake message.
+    wakes = len(fake.received("WAKE_STB", BEDROOM))
+    await client.play_recording(BEDROOM, "11")
+    await wait_for(lambda: [m for m in fake.received("PLAY_ASSET", BEDROOM)])
+    assert len(fake.received("WAKE_STB", BEDROOM)) == wakes
+
     # Remote keys go out as KEYEVENT with the key name.
     await client.send_key(LOUNGE, fetchtv.KEY_UP)
     await wait_for(lambda: fake.received("KEYEVENT", LOUNGE))
     assert fake.received("KEYEVENT", LOUNGE)[-1]["message"]["keyName"] == "KEY_UP"
+    keycodes = len(fake.received("KEYCODE", LOUNGE))
     await client.send_keycode(LOUNGE, "7")
-    await wait_for(lambda: fake.received("KEYCODE", LOUNGE))
+    await wait_for(lambda: len(fake.received("KEYCODE", LOUNGE)) > keycodes)
     assert fake.received("KEYCODE", LOUNGE)[-1]["message"]["keyCode"] == ord("7")
 
     # Pause / unpause messages update the play state.

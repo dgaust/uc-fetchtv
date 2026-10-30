@@ -63,7 +63,7 @@ import [`cosmos-compose.json`](cosmos-compose.json).
 
 ## Entities and commands
 
-Each box is added as three entities.
+Each box is added as a media player, a channel select, a remote and three sensors.
 
 ### Media player
 
@@ -73,13 +73,21 @@ Each box is added as three entities.
 | Playback | play/pause, stop, fast forward, rewind, record |
 | Navigation | up, down, left, right, OK, back, menu, guide, info, exit |
 | Channels | channel up/down, number pad, channel list, channel browser (free to air and subscription, with logos and what's on now) |
-| Recordings | the browser lists the box's recordings, newest first; pick one to play it on the box |
+| Recordings | the browser lists the box's recordings, newest first, with a folder for each series; pick one to play it on the box |
+| Volume | set the box's volume, up, down, mute |
+| Start over | the `START_OVER` command restarts the programme that is on now |
 | Other | mute, text, red, green, yellow, blue |
 | Shows | programme title, channel name and logo, episode, progress |
 
 ### Channel select
 
 Pick a channel from a list: select, next, previous, first, last.
+
+Playing a channel or recording on a box that is in standby wakes it first, then plays.
+
+### Sensors
+
+Three per box, for automations: **recordings** (how many are on the box), **scheduled recordings** (how many are scheduled) and **recording now** (Yes or No). They update when the box sends its full report, at start-up and when you open the Recordings folder.
 
 ### Remote
 
@@ -92,7 +100,10 @@ BACK  EXIT  MENU  GUIDE  INFO  TEXT
 PLAY_PAUSE  STOP  FAST_FORWARD  REWIND  RECORD  MUTE_TOGGLE
 RED  GREEN  YELLOW  BLUE
 CHANNEL_UP  CHANNEL_DOWN  DIGIT_0 ... DIGIT_9
+START_OVER  VOLUME_UP  VOLUME_DOWN
 ```
+
+To type text into the box (for example in a search box), send the command `TYPE:` followed by the text, such as `TYPE:dirty jobs`. Letters, digits and punctuation only, up to 64 characters.
 
 Default Remote 3 layout (change it in the web configurator):
 
@@ -106,8 +117,8 @@ Default Remote 3 layout (change it in the web configurator):
 | Record | record |
 | Previous, Play, Stop, Next | rewind, play/pause, stop, fast forward |
 
-Screens: **Numbers** (number pad and Text) and **Keys** (colours, Info, Exit).
-Home and Power are left alone.
+Screens: **Numbers** (number pad and Text) and **Keys** (colours, Info, Exit, Start over).
+Home and Power are left alone, and the volume commands are not placed on a button or screen: your Remote's volume buttons usually control the TV or amplifier.
 
 ## More
 

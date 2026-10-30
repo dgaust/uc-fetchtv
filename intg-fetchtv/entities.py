@@ -58,6 +58,7 @@ _SELECT_PREFIX = "select."
 # Media browser folders.
 _ROOT, _FREE_TO_AIR, _SUBSCRIPTION, _RECORDINGS = "root", "fta", "subscription", "recordings"
 _RECORDING_PREFIX = "recording:"
+_SERIES_PREFIX = "series:"
 
 ClientGetter = Callable[[], "FetchTvClient | None"]
 
@@ -69,6 +70,8 @@ FEATURES = [
     Feat.FAST_FORWARD,
     Feat.REWIND,
     Feat.MUTE_TOGGLE,
+    Feat.VOLUME,
+    Feat.VOLUME_UP_DOWN,
     Feat.DPAD,
     Feat.NUMPAD,
     Feat.MENU,
@@ -94,6 +97,10 @@ SIMPLE_COMMANDS = {
     "EXIT": fetchtv.KEY_EXIT,
     "TEXT": fetchtv.KEY_TEXT,
 }
+
+# Offered as simple commands, but not key presses.
+START_OVER = "START_OVER"
+VOLUME_STEP = 5
 
 _KEY_COMMANDS = {
     Cmd.PLAY_PAUSE: fetchtv.KEY_PLAY_PAUSE,
@@ -158,7 +165,7 @@ class FetchMediaPlayer(MediaPlayer):
             FEATURES,
             {Attr.STATE: States.UNAVAILABLE},
             device_class=DeviceClasses.SET_TOP_BOX,
-            options={Options.SIMPLE_COMMANDS: list(SIMPLE_COMMANDS)},
+            options={Options.SIMPLE_COMMANDS: [*SIMPLE_COMMANDS, START_OVER]},
             cmd_handler=_make_cmd_handler(terminal_id, get_client),
         )
         self._terminal_id = terminal_id
@@ -252,17 +259,28 @@ async def browse_channels(
         )
         return BrowseResults(media=folder, pagination=pagination)
 
-    if media_id == _RECORDINGS:
+    if media_id == _RECORDINGS or media_id.startswith(_SERIES_PREFIX):
         await client.refresh_recordings(box)
-        # Newest first: what you want to watch is usually what was just recorded.
-        recordings = sorted(box.recordings, key=lambda r: (r.start_ms, r.id), reverse=True)
-        shown = recordings[start:start + paging.limit]
         logos = {c.id: c.logo for c in channels}
-        chunk = [_recording_item(r, logos.get(r.channel_id)) for r in shown]
-        pagination = Pagination(page=paging.page, limit=len(chunk), count=len(recordings))
+        if media_id == _RECORDINGS:
+            title, entries = "Recordings", _recording_entries(box.recordings)
+            shown = entries[start:start + paging.limit]
+            chunk = [
+                _recording_item(e, logos.get(e.channel_id)) if isinstance(e, fetchtv.Recording)
+                else _series_item(e, logos.get(e[0].channel_id))
+                for e in shown
+            ]
+        else:
+            series_id = media_id[len(_SERIES_PREFIX):]
+            episodes = _newest_first([r for r in box.recordings if r.series_id == series_id])
+            if not episodes:
+                return StatusCodes.NOT_FOUND
+            title, entries = episodes[0].title, episodes
+            chunk = [_recording_item(r, logos.get(r.channel_id)) for r in episodes[start:start + paging.limit]]
+        pagination = Pagination(page=paging.page, limit=len(chunk), count=len(entries))
         folder = BrowseMediaItem(
-            media_id=_RECORDINGS,
-            title="Recordings",
+            media_id=media_id,
+            title=title,
             media_class=MediaClass.DIRECTORY,
             can_browse=True,
             items=chunk,
@@ -270,6 +288,49 @@ async def browse_channels(
         return BrowseResults(media=folder, pagination=pagination)
 
     return StatusCodes.NOT_FOUND
+
+
+def _newest_first(recordings: list[fetchtv.Recording]) -> list[fetchtv.Recording]:
+    # What you want to watch is usually what was just recorded.
+    return sorted(recordings, key=lambda r: (r.start_ms, r.id), reverse=True)
+
+
+def _recording_entries(
+    recordings: list[fetchtv.Recording],
+) -> list[fetchtv.Recording | list[fetchtv.Recording]]:
+    """
+    What the Recordings folder lists, newest first: each series with several
+    recordings as one folder, and every other recording on its own.
+    """
+    by_series: dict[str, list[fetchtv.Recording]] = {}
+    entries: list[fetchtv.Recording | list[fetchtv.Recording]] = []
+    for recording in recordings:
+        if recording.series_id:
+            by_series.setdefault(recording.series_id, []).append(recording)
+        else:
+            entries.append(recording)
+    for group in by_series.values():
+        group = _newest_first(group)
+        entries.append(group if len(group) > 1 else group[0])
+
+    def newest(entry: fetchtv.Recording | list[fetchtv.Recording]) -> tuple[int, str]:
+        latest = entry[0] if isinstance(entry, list) else entry
+        return latest.start_ms, latest.id
+
+    return sorted(entries, key=newest, reverse=True)
+
+
+def _series_item(episodes: list[fetchtv.Recording], logo: str | None) -> BrowseMediaItem:
+    """A series with several recordings, as a folder of its episodes."""
+    latest = episodes[0]
+    return BrowseMediaItem(
+        media_id=f"{_SERIES_PREFIX}{latest.series_id}",
+        title=latest.title,
+        subtitle=f"{len(episodes)} recordings",
+        media_class=MediaClass.DIRECTORY,
+        can_browse=True,
+        thumbnail=logo or CHANNEL_PLACEHOLDER,
+    )
 
 
 def _recording_item(recording: fetchtv.Recording, logo: str | None) -> BrowseMediaItem:
@@ -351,6 +412,7 @@ def attributes(
         Attr.MEDIA_ARTIST: channel_name if channel_name != box.media_title or program else "",
         Attr.MEDIA_IMAGE_URL: (channel.logo if channel else None) or CHANNEL_PLACEHOLDER,
     }
+    _add_volume(attrs, box)
     if program and live:
         attrs[Attr.MEDIA_TITLE] = program.title
         attrs[Attr.MEDIA_ALBUM] = program.episode_title or program.genre
@@ -367,13 +429,20 @@ def attributes(
     return attrs
 
 
+def _add_volume(attrs: dict[str, Any], box: Box) -> None:
+    if box.volume is not None:
+        attrs[Attr.VOLUME] = box.volume
+    if box.muted is not None:
+        attrs[Attr.MUTED] = box.muted
+
+
 def _recording_attributes(box: Box, channel: fetchtv.Channel | None) -> dict[str, Any]:
     """What a box playing one of its recordings shows (not the channel's live guide)."""
     recorded = next((r for r in box.recordings if r.id == box.recording_id), None)
     episode = recorded or fetchtv.Recording(
         id=box.recording_id, title=box.media_title, season=box.season, episode=box.episode
     )
-    return {
+    attrs = {
         Attr.STATE: _state(box),
         Attr.SOURCE: "",
         Attr.MEDIA_TYPE: MediaContentType.EPISODE if episode.episode else MediaContentType.VIDEO,
@@ -384,6 +453,8 @@ def _recording_attributes(box: Box, channel: fetchtv.Channel | None) -> dict[str
         Attr.MEDIA_DURATION: box.recording_duration_s or (recorded.duration_s if recorded else 0),
         Attr.MEDIA_POSITION: 0,
     }
+    _add_volume(attrs, box)
+    return attrs
 
 
 def _state(box: Box) -> States:
@@ -465,6 +536,18 @@ async def _run_command(
         await client.send_key(tid, _KEY_COMMANDS[cmd_id])
     elif cmd_id in _DIGITS:
         await client.send_keycode(tid, _DIGITS[cmd_id])
+    elif cmd_id == START_OVER:
+        if not await client.start_over_current(box):
+            return StatusCodes.SERVICE_UNAVAILABLE
+    elif cmd_id == Cmd.VOLUME:
+        try:
+            level = int(params.get("volume"))
+        except (TypeError, ValueError):
+            return StatusCodes.BAD_REQUEST
+        await client.set_volume(tid, level)
+    elif cmd_id in (Cmd.VOLUME_UP, Cmd.VOLUME_DOWN):
+        step = VOLUME_STEP if cmd_id == Cmd.VOLUME_UP else -VOLUME_STEP
+        await client.set_volume(tid, (box.volume or 0) + step)
     elif cmd_id == Cmd.TOGGLE:
         await client.send_key(tid, fetchtv.KEY_POWER)
     elif cmd_id in (Cmd.ON, Cmd.OFF):

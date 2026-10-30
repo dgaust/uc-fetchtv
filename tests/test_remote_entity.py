@@ -26,6 +26,16 @@ class FakeClient(FetchTvClient):
     async def send_keycode(self, terminal_id, char):
         self.sent.append(("keycode", char))
 
+    async def set_volume(self, terminal_id, level):
+        self.sent.append(("volume", max(0, min(100, level))))
+
+    async def start_over_current(self, box):
+        self.sent.append(("start_over",))
+        return bool(box.channel_id)
+
+    async def type_text(self, terminal_id, text):
+        self.sent.append(("type", text))
+
     async def send_raw(self, terminal_id, msg_type, extra):
         self.sent.append(("raw", msg_type, extra))
 
@@ -142,13 +152,31 @@ mapped = {press["cmd_id"] for m in buttons.values()
 on_screen = {i["command"]["cmd_id"] for p in pages for i in p["items"]}
 assert not on_screen & mapped, on_screen & mapped
 # ...and nothing is left off both: every command is on a button or on the screen.
-assert commands <= mapped | on_screen, commands - mapped - on_screen
+assert commands - {"VOLUME_UP", "VOLUME_DOWN"} <= mapped | on_screen, commands - mapped - on_screen
 for page in pages:
     grid = page["grid"]
     cells = [(i["location"]["x"], i["location"]["y"]) for i in page["items"]]
     assert len(cells) == len(set(cells)), f"{page['page_id']} has overlapping items"
     assert all(0 <= x < grid["width"] and 0 <= y < grid["height"] for x, y in cells), page["page_id"]
     assert all(i["command"]["cmd_id"] in commands for i in page["items"]), page["page_id"]
+
+# Start over, volume steps and typed text.
+client.sent.clear()
+assert run("send_cmd", {"command": "START_OVER"}) == StatusCodes.OK and client.sent == [("start_over",)]
+box.channel_id = ""
+assert run("send_cmd", {"command": "START_OVER"}) == StatusCodes.SERVICE_UNAVAILABLE
+box.channel_id = "7"
+client.sent.clear()
+box.volume = 20
+assert run("send_cmd", {"command": "VOLUME_UP"}) == StatusCodes.OK and client.sent == [("volume", 25)]
+assert run("send_cmd", {"command": "VOLUME_DOWN"}) == StatusCodes.OK and client.sent[-1] == ("volume", 15)
+box.volume = None
+client.sent.clear()
+assert run("send_cmd", {"command": "TYPE:hello world"}) == StatusCodes.OK and client.sent == [("type", "hello world")]
+for bad in ("TYPE:", "TYPE:" + "x" * 65, "TYPE:caf\u00e9", "TYPE:tab\there"):
+    assert run("send_cmd", {"command": bad}) == StatusCodes.BAD_REQUEST, bad
+assert len(client.sent) == 1
+client.sent.clear()
 
 # Experiments (working out how to play a recording): off unless enabled, and
 # only a play message can be sent this way.
