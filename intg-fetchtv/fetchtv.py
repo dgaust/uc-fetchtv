@@ -110,6 +110,11 @@ PUBLIC_URL = "https://www.fetchtv.com.au"
 PREFETCH_MARGIN_MS = 15 * 60 * 1000
 # Guide channel list (names, logos) changes rarely.
 CHANNEL_LIST_MAX_AGE_S = 24 * 3600
+# After the guide fails (an error, or an answer that can't be used), it is not
+# asked again for this long, so a guide that is down is not hit on every box update.
+GUIDE_RETRY_S = 30.0
+# A channel the guide has no listings for is not asked about again for this long.
+NO_LISTINGS_RETRY_S = 120.0
 
 # Remote key names the box accepts in a KEYEVENT message.
 KEY_BACK = "KEY_BACK"
@@ -361,6 +366,11 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(value)
 
 
+def _dicts(value: Any) -> list[dict]:
+    """The objects in a list from the service, leaving out anything else."""
+    return [item for item in _as_list(value) if isinstance(item, dict)]
+
+
 def _as_list(value: Any) -> list:
     """``value`` if it is a list, else an empty one (the service's lists can be null or odd)."""
     return value if isinstance(value, list) else []
@@ -382,17 +392,18 @@ def _logo_url(key: str, raw: dict[str, Any]) -> str | None:
     public site serves subscription (streaming) channels' logos by guide key
     instead. Free-to-air channels have no logo there, so they get none.
     """
-    streaming = any(s.get("type") == "hls" for s in raw.get("sources") or [])
+    streaming = any(s.get("type") == "hls" for s in _dicts(raw.get("sources")))
     if not streaming or not _logo(raw):
         return None
     return f"{PUBLIC_URL}/v2/epg/channels/{key}/image"
 
 
 def _logo(raw: dict[str, Any]) -> str | None:
-    images = raw.get("images") or {}
+    images = raw.get("images")
     for key in ("channel_logo_focus", "channel_logo"):
-        url = (images.get(key) or {}).get("original")
-        if url:
+        image = images.get(key) if isinstance(images, dict) else None
+        url = image.get("original") if isinstance(image, dict) else None
+        if url and isinstance(url, str):
             return url
     return None
 
@@ -402,12 +413,14 @@ class Guide:
 
     def __init__(self, channels: dict[str, dict[str, Any]]):
         self.loaded_at = time.monotonic()
+        # Entries that are not objects are of no use.
+        channels = {k: v for k, v in channels.items() if isinstance(v, dict)}
         self._raw = channels
         # Every id a box may report (DVB source ids, HLS ids) -> guide key.
         self._by_source_id: dict[str, str] = {}
         for key, raw in channels.items():
             self._by_source_id[str(key)] = str(key)
-            for source in raw.get("sources") or []:
+            for source in _dicts(raw.get("sources")):
                 if source.get("id") is not None:
                     self._by_source_id.setdefault(str(source["id"]), str(key))
         self.subscription_channels = sorted(
@@ -422,11 +435,13 @@ class Guide:
                 )
                 for key, raw in channels.items()
                 if raw.get("subscribed")
-                and any(s.get("type") == "hls" for s in raw.get("sources") or [])
+                and any(s.get("type") == "hls" for s in _dicts(raw.get("sources")))
             ),
             key=lambda c: (c.number, c.name),
         )
         self._programs: dict[str, list[Program]] = {}
+        # Channels the guide had no listings for, and when to ask again.
+        self._empty_until: dict[str, float] = {}
         # Where free-to-air logos live isn't known yet - show what the guide has.
         for key, raw in channels.items():
             if not raw.get("subscribed") and raw.get("images"):
@@ -445,7 +460,8 @@ class Guide:
     def name(self, epg_key: str) -> str | None:
         """Channel name for a guide key."""
         raw = self._raw.get(epg_key)
-        return raw.get("name") if raw else None
+        name = raw.get("name") if raw else None
+        return name if isinstance(name, str) else None
 
     def cached_program(self, epg_key: str, at_ms: int) -> Program | None:
         """The cached programme on air at ``at_ms``, without fetching."""
@@ -461,11 +477,23 @@ class Guide:
 
     def set_programs(self, epg_key: str, programs: list[Program]) -> None:
         self._programs[epg_key] = sorted(programs, key=lambda p: p.start_ms)
+        self._empty_until.pop(epg_key, None)
+
+    def mark_empty(self, epg_key: str) -> None:
+        """Note that the guide has nothing for this channel, so it is not asked again soon."""
+        self._empty_until[epg_key] = time.monotonic() + NO_LISTINGS_RETRY_S
+
+    def recently_empty(self, epg_key: str) -> bool:
+        return self._empty_until.get(epg_key, 0.0) > time.monotonic()
 
 
 def parse_programs(response: dict[str, Any]) -> dict[str, list[Program]]:
     """Parse a ``/v2/epg/programslist`` response into programmes per guide key."""
-    fields = (response.get("__meta__") or {}).get("program_fields") or []
+    if not isinstance(response, dict):
+        return {}
+    meta = response.get("__meta__")
+    fields = meta.get("program_fields") if isinstance(meta, dict) else None
+    fields = fields if isinstance(fields, list) else []
 
     def index(name: str) -> int | None:
         return fields.index(name) if name in fields else None
@@ -473,7 +501,8 @@ def parse_programs(response: dict[str, Any]) -> dict[str, list[Program]]:
     i_title, i_start, i_end = index("title"), index("start"), index("end")
     i_episode, i_genre = index("episode_title"), index("genre")
     i_synopsis, i_id = index("synopsis_id"), index("id")
-    synopses = response.get("synopses") or {}
+    synopses = response.get("synopses")
+    synopses = synopses if isinstance(synopses, dict) else {}
     if i_title is None or i_start is None or i_end is None:
         return {}
 
@@ -481,7 +510,8 @@ def parse_programs(response: dict[str, Any]) -> dict[str, list[Program]]:
         return row[i] if i is not None and i < len(row) else None
 
     result: dict[str, list[Program]] = {}
-    for key, rows in (response.get("channels") or {}).items():
+    channels = response.get("channels")
+    for key, rows in (channels if isinstance(channels, dict) else {}).items():
         result[str(key)] = [
             Program(
                 title=str(get(row, i_title) or ""),
@@ -492,7 +522,8 @@ def parse_programs(response: dict[str, Any]) -> dict[str, list[Program]]:
                 synopsis=str(synopses.get(str(get(row, i_synopsis)), "")),
                 program_id=str(get(row, i_id) or ""),
             )
-            for row in rows
+            for row in _as_list(rows)
+            if isinstance(row, list)
         ]
     return result
 
@@ -531,6 +562,9 @@ class FetchTvClient:
         self._callbacks: list[Callback] = []
         self._guide: Guide | None = None
         self._guide_lock = asyncio.Lock()
+        self._programs_lock = asyncio.Lock()
+        self._guide_retry_at = 0.0
+        self._programs_retry_at = 0.0
         self.boxes: dict[str, Box] = {}
         self._alive_waiters: dict[str, asyncio.Event] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -855,27 +889,44 @@ class FetchTvClient:
         guide = self._guide
         if channel is None or guide is None:
             return None
-        now = _now_ms()
-        if not guide.has_listings(channel.epg_id, now):
-            try:
-                _, _, body = await asyncio.to_thread(
-                    self._http,
-                    "GET",
-                    "/v2/epg/programslist",
-                    params={
-                        "channel_ids": channel.epg_id,
-                        "count": 42,
-                        "extended": 1,
-                        "off_air_catchup": 0,
-                        "include_catchup": 0,
-                    },
-                )
-            except _HTTP_ERRORS as ex:
-                _LOG.warning("Guide lookup for %s failed: %s", channel.name, ex)
-                return None
-            for key, programs in parse_programs(body).items():
-                guide.set_programs(key, programs)
-        return guide.cached_program(channel.epg_id, now)
+        async with self._programs_lock:  # callers asking at once share one lookup
+            if not self._have_or_asked(guide, channel.epg_id, _now_ms()):
+                await self._fetch_programs(guide, [channel.epg_id], 42)
+        return guide.cached_program(channel.epg_id, _now_ms())
+
+    def _have_or_asked(self, guide: Guide, epg_key: str, at_ms: int) -> bool:
+        """True when there is nothing to fetch for a channel: cached, known empty, or the guide is failing."""
+        return (
+            guide.has_listings(epg_key, at_ms)
+            or guide.recently_empty(epg_key)
+            or time.monotonic() < self._programs_retry_at
+        )
+
+    async def _fetch_programs(self, guide: Guide, keys: list[str], count: int) -> None:
+        """Fetch listings for guide keys into the cache; a failure pauses further lookups for a while."""
+        try:
+            _, _, body = await asyncio.to_thread(
+                self._http,
+                "GET",
+                "/v2/epg/programslist",
+                params={
+                    "channel_ids": ",".join(keys),
+                    "count": count,
+                    "extended": 1,
+                    "off_air_catchup": 0,
+                    "include_catchup": 0,
+                },
+            )
+        except _HTTP_ERRORS as ex:
+            _LOG.warning("Guide lookup for %d channel(s) failed: %s", len(keys), ex)
+            self._programs_retry_at = time.monotonic() + GUIDE_RETRY_S
+            return
+        programs = parse_programs(body)
+        for key, listing in programs.items():
+            guide.set_programs(key, listing)
+        for key in keys:
+            if not programs.get(key):
+                guide.mark_empty(key)
 
     def cached_channel_program(self, channel: Channel, at_ms: int | None = None) -> Program | None:
         """What is on air on a channel, from the cache (no network)."""
@@ -907,28 +958,11 @@ class FetchTvClient:
         guide = self._guide
         if guide is None:
             return
-        at = _now_ms() + margin_ms
-        keys = sorted({c.epg_id for c in channels if not guide.has_listings(c.epg_id, at)})
-        if not keys:
-            return
-        try:
-            _, _, body = await asyncio.to_thread(
-                self._http,
-                "GET",
-                "/v2/epg/programslist",
-                params={
-                    "channel_ids": ",".join(keys),
-                    "count": count,
-                    "extended": 1,
-                    "off_air_catchup": 0,
-                    "include_catchup": 0,
-                },
-            )
-        except _HTTP_ERRORS as ex:
-            _LOG.warning("Guide lookup for %d channel(s) failed: %s", len(keys), ex)
-            return
-        for key, programs in parse_programs(body).items():
-            guide.set_programs(key, programs)
+        async with self._programs_lock:
+            at = _now_ms() + margin_ms
+            keys = sorted({c.epg_id for c in channels if not self._have_or_asked(guide, c.epg_id, at)})
+            if keys:
+                await self._fetch_programs(guide, keys, count)
 
     # --- internals ------------------------------------------------------------
 
@@ -956,12 +990,21 @@ class FetchTvClient:
         async with self._guide_lock:
             if self._guide and time.monotonic() - self._guide.loaded_at < CHANNEL_LIST_MAX_AGE_S:
                 return
+            if time.monotonic() < self._guide_retry_at:
+                return
             try:
                 _, _, body = await asyncio.to_thread(self._http, "GET", "/v2/epg/channels")
             except _HTTP_ERRORS as ex:
                 _LOG.warning("Could not load the FetchTV channel list: %s", ex)
+                self._guide_retry_at = time.monotonic() + GUIDE_RETRY_S
                 return
-            self._guide = Guide(body.get("channels") or {})
+            channels = body.get("channels") if isinstance(body, dict) else None
+            if not isinstance(channels, dict) or not channels:
+                # Keep what there is (an older list) rather than lose every subscription channel.
+                _LOG.warning("The FetchTV channel list came back empty or unreadable")
+                self._guide_retry_at = time.monotonic() + GUIDE_RETRY_S
+                return
+            self._guide = Guide(channels)
             _LOG.info(
                 "Loaded FetchTV guide: %d subscription channel(s)",
                 len(self._guide.subscription_channels),
