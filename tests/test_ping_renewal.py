@@ -25,6 +25,12 @@ async def main():
     await asyncio.wait_for(client.ready.wait(), 5)
     await wait_for(lambda: all(b.has_state for b in client.boxes.values()))
 
+    # A box is asked for its media state as well as its full report (a box that has
+    # no recordings, like the Mini, only ever answers the first).
+    assert fake.received("MEDIA_STATE", LOUNGE), "no MEDIA_STATE asked of a new box"
+    kinds = [m["message"]["type"] for m in fake.ws_received if m["to"] == LOUNGE]
+    assert kinds.index("PING") < kinds.index("MEDIA_STATE"), kinds
+
     pings = lambda tid: len(fake.received("PING", tid))
     first = {t: pings(t) for t in (LOUNGE, BEDROOM)}
     assert all(n >= 1 for n in first.values()), first

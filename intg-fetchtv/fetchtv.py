@@ -1211,10 +1211,12 @@ class FetchTvClient:
                     if not box.online or now - self._pinged_at.get(tid, -SUBSCRIPTION_RENEW_S) >= SUBSCRIPTION_RENEW_S:
                         self._pinged_at[tid] = now
                         await self.ping(tid)
-                    if box.online:
-                        await self.request_media_state(tid)
-                    else:
+                    if not box.online:
                         await self._ask_alive(tid)
+                    # The app asks every box that answers its ping for its media
+                    # state; a box without recordings (the Mini) never answers
+                    # the full report, so this is how it first reports.
+                    await self.request_media_state(tid)
                 except NotConnectedError:
                     return
             await asyncio.sleep(self._poll_interval)
@@ -1265,6 +1267,7 @@ class FetchTvClient:
         elif msg_type == "PONG":
             if not box.has_state:
                 await self._ask_alive(box.terminal_id)
+                await self.request_media_state(box.terminal_id)
             return
         else:
             # Anything else is not acted on, but its content is what to look at
