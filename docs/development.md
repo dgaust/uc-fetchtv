@@ -53,6 +53,12 @@ Android app (3.33.2, version code 6562) sends, found by reading the app itself:
 - The device id is a random 16-character hex string made once per installation
   and kept in `config.json` (the app sends its Android id, the same shape).
 
+- `PING` to each box on connecting, and again every 14,380 s while connected
+  (the app's own interval). A box answers `PONG`, and the ping subscribes the
+  sender to the box's events for four hours. Without it a box can stop talking
+  to the driver once an earlier subscription (the Fetch app's) lapses, while
+  the app still controls it.
+
 When the app is updated, bump `APP_VERSION` in `fetchtv.py` to its
 `<version>.<version code>`.
 

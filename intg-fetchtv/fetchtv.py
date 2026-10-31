@@ -136,6 +136,9 @@ GUIDE_RETRY_S = 30.0
 NO_LISTINGS_RETRY_S = 120.0
 # The most often the service is signed in to again because an API call was refused.
 RELOGIN_MIN_INTERVAL_S = 60.0
+# A PING subscribes the sender to a box's events for four hours; the Fetch app
+# sends it again after 14,380 s (just under that) whenever it is connected.
+SUBSCRIPTION_RENEW_S = 14380.0
 # A box that has just been asked for its full report is not asked again for this long.
 ALIVE_DEDUPE_S = 5.0
 # After a power press, the same direction asked for again within this long is
@@ -603,6 +606,7 @@ class FetchTvClient:
         self._alive_waiters: dict[str, asyncio.Event] = {}
         self._alive_asked_at: dict[str, float] = {}
         self._alive_sent_at: dict[str, float] = {}
+        self._pinged_at: dict[str, float] = {}
         self._tasks: set[asyncio.Task] = set()
         self._typing_locks: dict[str, asyncio.Lock] = {}
         self._report_pending: set[str] = set()
@@ -1191,7 +1195,9 @@ class FetchTvClient:
             finally:
                 poller.cancel()
                 self._ws = None
-                self._alive_sent_at.clear()  # a new connection must ask again straight away
+                # A new connection must ask again straight away, and subscribe again.
+                self._alive_sent_at.clear()
+                self._pinged_at.clear()
                 for box in self.boxes.values():
                     box.online = False
 
@@ -1199,10 +1205,15 @@ class FetchTvClient:
         while True:
             for tid, box in list(self.boxes.items()):
                 try:
+                    # A box that has not answered is pinged every round; one that
+                    # has is pinged again only when the last one is about to lapse.
+                    now = time.monotonic()
+                    if not box.online or now - self._pinged_at.get(tid, -SUBSCRIPTION_RENEW_S) >= SUBSCRIPTION_RENEW_S:
+                        self._pinged_at[tid] = now
+                        await self.ping(tid)
                     if box.online:
                         await self.request_media_state(tid)
                     else:
-                        await self.ping(tid)
                         await self._ask_alive(tid)
                 except NotConnectedError:
                     return
