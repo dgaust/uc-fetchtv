@@ -136,6 +136,8 @@ GUIDE_RETRY_S = 30.0
 NO_LISTINGS_RETRY_S = 120.0
 # The most often the service is signed in to again because an API call was refused.
 RELOGIN_MIN_INTERVAL_S = 60.0
+# A box that has just been asked for its full report is not asked again for this long.
+ALIVE_DEDUPE_S = 5.0
 # After a power press, the same direction asked for again within this long is
 # dropped: the box has not reported its new state yet, so a second press would
 # put it straight back.
@@ -600,6 +602,7 @@ class FetchTvClient:
         self.boxes: dict[str, Box] = {}
         self._alive_waiters: dict[str, asyncio.Event] = {}
         self._alive_asked_at: dict[str, float] = {}
+        self._alive_sent_at: dict[str, float] = {}
         self._tasks: set[asyncio.Task] = set()
         self._typing_locks: dict[str, asyncio.Lock] = {}
         self._report_pending: set[str] = set()
@@ -890,6 +893,35 @@ class FetchTvClient:
             terminal_id, "PLAY_ASSET", {"assetType": "RECORDING", "recordingId": int(recording_id)}
         )
 
+    async def ping(self, terminal_id: str) -> None:
+        """
+        Say hello to a box the way the Fetch app does; the box answers ``PONG``.
+
+        The app sends this to every box it knows to find out whether it is
+        reachable, and only then asks for its state. It also signs the sender up
+        for the box's events (the app renews that every four hours). Not queued:
+        a box that is not connected just does not answer.
+        """
+        await self._send(
+            terminal_id,
+            "PING",
+            paired_only=True,
+            extra={"data": {"sysInfo": {"sendPastRecordings": False}}},
+        )
+
+    async def _ask_alive(self, terminal_id: str) -> None:
+        """
+        Ask a box for its full report, unless that was just done.
+
+        The box's ``PONG`` and the poll both ask; a box that answers the
+        ``PING`` would otherwise be asked twice, and the report can be megabytes.
+        """
+        now = time.monotonic()
+        if now - self._alive_sent_at.get(terminal_id, -ALIVE_DEDUPE_S) < ALIVE_DEDUPE_S:
+            return
+        self._alive_sent_at[terminal_id] = now
+        await self._send(terminal_id, "ARE_YOU_ALIVE", queueable=True, paired_only=True)
+
     async def request_media_state(self, terminal_id: str) -> None:
         """Ask a box to report what it is playing."""
         await self._send(terminal_id, "MEDIA_STATE", requires_stb=True)
@@ -1159,6 +1191,7 @@ class FetchTvClient:
             finally:
                 poller.cancel()
                 self._ws = None
+                self._alive_sent_at.clear()  # a new connection must ask again straight away
                 for box in self.boxes.values():
                     box.online = False
 
@@ -1169,7 +1202,8 @@ class FetchTvClient:
                     if box.online:
                         await self.request_media_state(tid)
                     else:
-                        await self._send(tid, "ARE_YOU_ALIVE", queueable=True, paired_only=True)
+                        await self.ping(tid)
+                        await self._ask_alive(tid)
                 except NotConnectedError:
                     return
             await asyncio.sleep(self._poll_interval)
@@ -1219,7 +1253,7 @@ class FetchTvClient:
             return
         elif msg_type == "PONG":
             if not box.has_state:
-                await self._send(box.terminal_id, "ARE_YOU_ALIVE", queueable=True, paired_only=True)
+                await self._ask_alive(box.terminal_id)
             return
         else:
             # Anything else is not acted on, but its content is what to look at

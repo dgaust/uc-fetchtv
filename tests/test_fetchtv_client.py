@@ -64,6 +64,16 @@ async def main():
     assert bedroom.channel_id == "2319"
     assert None in updates and lounge in updates
 
+    # Each box is said hello to the way the Fetch app does (a PING, not queued,
+    # carrying the subscription details) before it is asked for its state.
+    pings = [m for m in fake.ws_received if m["message"]["type"] == "PING" and m["to"] == LOUNGE]
+    assert pings, "no PING sent to a box that had not answered yet"
+    ping = pings[0]["message"]
+    assert ping["isQueueable"] is False and ping["onlyPairedSetTopBox"] is True
+    assert ping["data"]["sysInfo"] == {"sendPastRecordings": False} and "messageId" in ping["data"], ping
+    kinds = [m["message"]["type"] for m in fake.ws_received if m["to"] == LOUNGE]
+    assert kinds.index("PING") < kinds.index("ARE_YOU_ALIVE"), kinds
+
     # Recordings arrive in the full report; the one pending deletion is dropped,
     # and a time in milliseconds is kept as is.
     assert [(r.title, r.label) for r in lounge.recordings] == [
