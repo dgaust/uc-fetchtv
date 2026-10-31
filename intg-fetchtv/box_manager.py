@@ -14,6 +14,9 @@ and re-subscribes, before the sign-in has finished.
 
 import asyncio
 import logging
+import math
+import os
+import sys
 import time
 from typing import Any
 
@@ -34,11 +37,33 @@ _LOG = logging.getLogger(__name__)
 REFRESH_INTERVAL_S = 30.0
 # During setup, how long to wait for the websocket and the boxes' first reports.
 _SETUP_BOX_WAIT_S = 8.0
-# When the Remote goes to sleep, the FetchTV session is kept this long before it
-# is closed. The Remote wakes and sleeps all day; signing in again each time is
-# more often than the Fetch app would, and a Remote back within this time just
-# picks up the session that is already running.
-SESSION_GRACE_S = 600.0
+
+
+def _grace_from_environment() -> float:
+    """
+    How long the FetchTV session outlives the Remote's connection, in seconds.
+
+    The Remote wakes and sleeps all day; signing in again each time is more
+    often than the Fetch app would, and a Remote back within this time just
+    picks up the session that is already running. On a server that costs
+    nothing, so it is 10 minutes. The on-Remote package (built with PyInstaller,
+    unlike the container image) shares the Remote's battery and Wi-Fi, so it
+    closes the session at once, as the Remote's own advice for standby is to
+    act on it. ``UC_SESSION_GRACE_S`` overrides either (0 = close at once).
+    """
+    raw = os.getenv("UC_SESSION_GRACE_S")
+    if raw is not None:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = math.nan
+        if math.isfinite(value) and value >= 0:
+            return value
+        _LOG.warning("Ignoring UC_SESSION_GRACE_S=%r: not a number of seconds", raw)
+    return 0.0 if getattr(sys, "frozen", False) else 600.0
+
+
+SESSION_GRACE_S = _grace_from_environment()
 
 _client: fetchtv.FetchTvClient | None = None
 _client_task: asyncio.Task | None = None
@@ -154,7 +179,8 @@ def disconnect_later(grace_s: float | None = None) -> None:
         return
     _cancel_grace()
     delay = SESSION_GRACE_S if grace_s is None else grace_s
-    _LOG.info("Remote went away: keeping the FetchTV session for %.0fs", delay)
+    if delay > 0:
+        _LOG.info("Remote went away: keeping the FetchTV session for %.0fs", delay)
     _grace_task = loop.create_task(_disconnect_after(delay))
 
 
