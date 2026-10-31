@@ -569,13 +569,11 @@ async def _run_command(
             return StatusCodes.SERVICE_UNAVAILABLE
         step = VOLUME_STEP if cmd_id == Cmd.VOLUME_UP else -VOLUME_STEP
         await client.set_volume(tid, box.volume + step)
-    elif cmd_id == Cmd.TOGGLE:
-        await client.send_key(tid, fetchtv.KEY_POWER)
-    elif cmd_id in (Cmd.ON, Cmd.OFF):
-        # The box only has a power toggle - press it only if it changes something.
-        want_standby = cmd_id == Cmd.OFF
-        if box.standby is not want_standby:
-            await client.send_key(tid, fetchtv.KEY_POWER)
+    elif cmd_id in (Cmd.ON, Cmd.OFF, Cmd.TOGGLE):
+        # The box only has a power toggle, so the client presses it only if it
+        # changes something - and not at all while the box's state is unknown.
+        if not await client.set_power(tid, None if cmd_id == Cmd.TOGGLE else cmd_id == Cmd.ON):
+            return StatusCodes.SERVICE_UNAVAILABLE
     elif cmd_id == Cmd.SELECT_SOURCE:
         source = params.get("source")
         channel = next((c for c in client.channels_for(box) if c.label == source), None)

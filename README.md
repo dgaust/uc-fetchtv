@@ -69,7 +69,7 @@ Each box is added as a media player, a channel select, a remote and five sensors
 
 | | |
 | --- | --- |
-| Power | on, off, toggle |
+| Power | on, off, toggle (pressed only when it changes something; while a box is unavailable, off and toggle are refused and on sends a wake) |
 | Playback | play/pause, stop, fast forward, rewind, record |
 | Navigation | up, down, left, right, OK, back, menu, guide, info, exit |
 | Channels | channel up/down, number pad, channel list, channel browser (free to air and subscription, with logos and what's on now) |

@@ -52,6 +52,11 @@ class FakeClient(fetchtv.FetchTvClient):
     async def send_keycode(self, terminal_id, char):
         self.sent.append(("keycode", terminal_id, char))
 
+    async def _send(self, terminal_id, msg_type, **kw):
+        if msg_type != "WAKE_STB":
+            return await super()._send(terminal_id, msg_type, **kw)
+        self.sent.append(("wake", terminal_id))
+
     async def play_channel(self, terminal_id, channel_id):
         self.sent.append(("play", terminal_id, channel_id))
 
@@ -180,7 +185,20 @@ box.standby = True
 n = len(client.sent)
 run(Cmd.OFF); assert len(client.sent) == n
 run(Cmd.ON); assert client.sent[-1] == ("key", TID, "KEY_POWER")
+# The box has not reported yet, so asking again for the same thing is dropped.
+n = len(client.sent)
+run(Cmd.ON); run(Cmd.ON); assert len(client.sent) == n
+client._power_pressed.clear()
 run(Cmd.TOGGLE); assert client.sent[-1] == ("key", TID, "KEY_POWER")
+
+# Unknown state: nothing is pressed (the press could switch it off); on wakes it instead.
+box.standby = None
+client._power_pressed.clear()
+n = len(client.sent)
+assert run(Cmd.OFF) == StatusCodes.SERVICE_UNAVAILABLE and run(Cmd.TOGGLE) == StatusCodes.SERVICE_UNAVAILABLE
+assert len(client.sent) == n
+assert run(Cmd.ON) == StatusCodes.OK and client.sent[-1] == ("wake", TID) and len(client.sent) == n + 1
+box.standby = True
 
 assert run(Cmd.SEEK) == StatusCodes.NOT_IMPLEMENTED
 client.connected = False

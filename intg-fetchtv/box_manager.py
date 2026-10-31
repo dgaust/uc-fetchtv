@@ -34,10 +34,16 @@ _LOG = logging.getLogger(__name__)
 REFRESH_INTERVAL_S = 30.0
 # During setup, how long to wait for the websocket and the boxes' first reports.
 _SETUP_BOX_WAIT_S = 8.0
+# When the Remote goes to sleep, the FetchTV session is kept this long before it
+# is closed. The Remote wakes and sleeps all day; signing in again each time is
+# more often than the Fetch app would, and a Remote back within this time just
+# picks up the session that is already running.
+SESSION_GRACE_S = 600.0
 
 _client: fetchtv.FetchTvClient | None = None
 _client_task: asyncio.Task | None = None
 _refresh_task: asyncio.Task | None = None
+_grace_task: asyncio.Task | None = None
 # Last attributes pushed per entity (without the always-moving position).
 _last_pushed: dict[str, dict[str, Any]] = {}
 
@@ -82,6 +88,7 @@ def register_cached_entities() -> None:
 
 async def connect() -> None:
     """Sign in with the saved account, if not already running."""
+    _cancel_grace()  # the Remote is back: the session it left running stays
     if _client is not None:
         return
     code, pin = config.get_credentials()
@@ -128,9 +135,38 @@ async def _start(client: fetchtv.FetchTvClient) -> None:
     await api.set_device_state(ucapi.DeviceStates.CONNECTING)
 
 
+def _cancel_grace() -> None:
+    global _grace_task
+    task, _grace_task = _grace_task, None
+    if task is not None and task is not asyncio.current_task():
+        task.cancel()
+
+
+def disconnect_later(grace_s: float | None = None) -> None:
+    """
+    Close the FetchTV session after a grace period, unless the Remote comes back first.
+
+    For the Remote going to sleep or disconnecting: it is usually back soon, and
+    keeping the session means no new sign-in each time.
+    """
+    global _grace_task
+    if _client is None:
+        return
+    _cancel_grace()
+    delay = SESSION_GRACE_S if grace_s is None else grace_s
+    _LOG.info("Remote went away: keeping the FetchTV session for %.0fs", delay)
+    _grace_task = loop.create_task(_disconnect_after(delay))
+
+
+async def _disconnect_after(delay: float) -> None:
+    await asyncio.sleep(delay)
+    await disconnect()
+
+
 async def disconnect() -> None:
     """Disconnect from FetchTV, if connected."""
     global _client, _client_task, _refresh_task
+    _cancel_grace()
     client, task, refresh = _client, _client_task, _refresh_task
     _client = _client_task = _refresh_task = None
     if refresh is not None:
@@ -180,8 +216,8 @@ async def _refresh_periodically() -> None:
     while True:
         await asyncio.sleep(REFRESH_INTERVAL_S)
         client = _client
-        if client is None or not client.connected:
-            continue
+        if client is None or not client.connected or _grace_task is not None:
+            continue  # (nobody is looking while the Remote sleeps)
         try:
             await client.prefetch_programs()
             for box in list(client.boxes.values()):

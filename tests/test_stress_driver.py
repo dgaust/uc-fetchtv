@@ -148,6 +148,8 @@ async def remote_comes_and_goes(fake):
 
 async def racing_standby(fake):
     """The Remote sleeps and wakes within the time the old connection takes to close."""
+    # No grace period, so standby closes the connection (and starts the race) straight away.
+    grace, box_manager.SESSION_GRACE_S = box_manager.SESSION_GRACE_S, 0.0
     box_manager.client_factory = lambda *a, **k: _slow(fake, *a, **k)
     remote = await Remote().open()
     await remote.request("subscribe_events", {"entity_ids": ALL})
@@ -165,6 +167,7 @@ async def racing_standby(fake):
     assert remote.device_states()[-1] == "CONNECTED", remote.device_states()
     await remote.close()
     box_manager.client_factory = fake.client
+    box_manager.SESSION_GRACE_S = grace
 
 
 def _slow(fake, *args, **kwargs):

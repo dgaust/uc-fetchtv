@@ -25,6 +25,11 @@ class FakeClient(FetchTvClient):
     async def send_keycode(self, terminal_id, char):
         self.sent.append(("keycode", char))
 
+    async def _send(self, terminal_id, msg_type, **kw):
+        if msg_type != "WAKE_STB":
+            return await super()._send(terminal_id, msg_type, **kw)
+        self.sent.append(("wake",))
+
     async def set_volume(self, terminal_id, level):
         self.sent.append(("volume", max(0, min(100, level))))
 
@@ -70,7 +75,16 @@ box.standby = True
 client.sent.clear()
 run("off"); assert client.sent == []
 run("on"); assert client.sent == [("key", "KEY_POWER")]
+run("on"); assert client.sent == [("key", "KEY_POWER")], "the same press twice before the box reports"
+client._power_pressed.clear()
 run("toggle"); assert client.sent[-1] == ("key", "KEY_POWER")
+# Unknown state: nothing is pressed (it could switch the box off); on wakes it instead.
+box.standby = None
+client._power_pressed.clear()
+client.sent.clear()
+assert run("off") == StatusCodes.SERVICE_UNAVAILABLE and run("toggle") == StatusCodes.SERVICE_UNAVAILABLE
+assert client.sent == []
+assert run("on") == StatusCodes.OK and client.sent == [("wake",)]
 box.standby = False
 client.sent.clear()
 

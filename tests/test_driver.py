@@ -153,6 +153,27 @@ async def main():
         assert resp["code"] == 200
         assert fake.received("KEYEVENT", BEDROOM)[-1]["message"]["keyName"] == "KEY_POWER"
 
+        # The Remote going away keeps the FetchTV session for a grace period:
+        # back in time it does not sign in again; away for good it is closed.
+        box_manager.SESSION_GRACE_S = 1.0
+        logins = fake.logins
+        await ws.send(json.dumps({"kind": "event", "msg": "disconnect"}))
+        await asyncio.sleep(0.3)
+        assert box_manager.get_client() is not None, "closed at once instead of after the grace period"
+        await ws.send(json.dumps({"kind": "event", "msg": "connect"}))
+        await asyncio.sleep(1.5)
+        assert box_manager.get_client() is not None, "the Remote came back but the session was closed"
+        assert fake.logins == logins, "signed in again although the session was kept"
+        await ws.send(json.dumps({"kind": "event", "msg": "enter_standby"}))
+        await asyncio.sleep(1.6)
+        assert box_manager.get_client() is None, "the session outlived the grace period"
+        await ws.send(json.dumps({"kind": "event", "msg": "exit_standby"}))
+        for _ in range(50):
+            if box_manager.is_connected():
+                break
+            await asyncio.sleep(0.1)
+        assert box_manager.is_connected() and fake.logins == logins + 1, (box_manager.is_connected(), fake.logins)
+
     # Restart: entities are registered from the saved cache before sign-in.
     await box_manager.disconnect()
     api.available_entities.clear()

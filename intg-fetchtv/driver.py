@@ -39,14 +39,14 @@ async def on_connect() -> None:
 
 @api.listens_to(ucapi.Events.DISCONNECT)
 async def on_disconnect() -> None:
-    """Remote wants us to disconnect: close the FetchTV connection."""
-    await box_manager.disconnect()
+    """Remote wants us to disconnect: close the FetchTV connection after a grace period."""
+    box_manager.disconnect_later()
 
 
 @api.listens_to(ucapi.Events.ENTER_STANDBY)
 async def on_enter_standby() -> None:
-    """Remote entered standby: drop the connection to save resources."""
-    await box_manager.disconnect()
+    """Remote entered standby: close the connection after a grace period, not at once."""
+    box_manager.disconnect_later()
 
 
 @api.listens_to(ucapi.Events.EXIT_STANDBY)

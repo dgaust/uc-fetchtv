@@ -10,11 +10,19 @@ LAN IP and recreate the container. Or, when adding the integration on the
 Remote, open the advanced settings and enter the driver's address, for example
 `ws://192.168.1.50:10092`.
 
-**The boxes show as unavailable.** The Remote closes its connection to a driver
-when it sleeps or when you disconnect the integration, and the driver then
-drops its link to Fetch until the Remote reconnects. Wake the Remote or
-reconnect the integration. If that doesn't help, check the driver's log for a
-connection from the Remote.
+**A box shows as unavailable.** The driver has not heard from that box through
+Fetch's service. Most often the box's own connection to Fetch has dropped while
+the box is still on your network (the Fetch app shows the same box as
+unreachable until you tap retry, and the driver picks the box up again as soon
+as it answers). Retrying from the Fetch app, or restarting the box, brings it
+back. While a box is unavailable, off and toggle are refused rather than
+guessed (the box only has a power toggle, so a blind press could switch it the
+wrong way), and on sends a wake, which never switches a box off.
+
+When the Remote sleeps or you disconnect the integration, the driver keeps its
+link to Fetch for 10 minutes before closing it, so a Remote that comes back in
+that time does not sign in again. If every box is unavailable, check the
+driver's log for a connection from the Remote.
 
 **A new entity or feature is missing after an update.** After an update that adds entities, add them in the Remote's web configurator, and re-add a media player or remote to get new features (see "To update" in the [README](../README.md)).
 

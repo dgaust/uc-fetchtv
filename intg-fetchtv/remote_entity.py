@@ -13,7 +13,8 @@ channel up/down - so activities can use them, and ships a default layout:
 - **Pages**: Numbers (number pad, Text) and Keys (colours, Info, Exit) -
   everything the buttons don't cover, so nothing is repeated on screen.
 - **State**: ON, or OFF in standby, and on / off / toggle press power only when
-  that changes something.
+  that changes something (and not at all while the box's state is unknown -
+  except on, which wakes the box instead).
 
 :license: MPL-2.0, see LICENSE for more details.
 """
@@ -206,14 +207,11 @@ def _delay_s(value: Any, default_ms: int) -> float:
 
 async def _run(client: FetchTvClient, box: Box, cmd_id: str, params: dict[str, Any]) -> StatusCodes:
     tid = box.terminal_id
-    if cmd_id in (Commands.ON, Commands.OFF):
-        # The box only has a power toggle - press it only if it changes something.
-        if box.standby is not (cmd_id == Commands.OFF):
-            await client.send_key(tid, fetchtv.KEY_POWER)
-        return StatusCodes.OK
-    if cmd_id == Commands.TOGGLE:
-        await client.send_key(tid, fetchtv.KEY_POWER)
-        return StatusCodes.OK
+    if cmd_id in (Commands.ON, Commands.OFF, Commands.TOGGLE):
+        # The box only has a power toggle, so the client presses it only if it
+        # changes something - and not at all while the box's state is unknown.
+        on = None if cmd_id == Commands.TOGGLE else cmd_id == Commands.ON
+        return StatusCodes.OK if await client.set_power(tid, on) else StatusCodes.SERVICE_UNAVAILABLE
 
     if cmd_id == Commands.SEND_CMD and _is_typing(params.get("command")):
         text = params["command"][len(TYPE_PREFIX):]

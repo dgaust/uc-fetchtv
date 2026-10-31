@@ -122,6 +122,10 @@ GUIDE_RETRY_S = 30.0
 NO_LISTINGS_RETRY_S = 120.0
 # The most often the service is signed in to again because an API call was refused.
 RELOGIN_MIN_INTERVAL_S = 60.0
+# After a power press, the same direction asked for again within this long is
+# dropped: the box has not reported its new state yet, so a second press would
+# put it straight back.
+POWER_SETTLE_S = 5.0
 
 # Remote key names the box accepts in a KEYEVENT message.
 KEY_BACK = "KEY_BACK"
@@ -585,6 +589,8 @@ class FetchTvClient:
         self._report_pending: set[str] = set()
         # Plays waiting for a box in standby to wake, per box, in the order asked.
         self._pending_plays: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        # When power was last pressed per box, and the way it was meant to go (True = on).
+        self._power_pressed: dict[str, tuple[float, bool]] = {}
         self.connected = False
         self.ready = asyncio.Event()
         """Set once signed in and the websocket is open."""
@@ -694,6 +700,35 @@ class FetchTvClient:
         await self._send(terminal_id, "KEYEVENT", requires_stb=True, extra={"keyName": key})
         if key == KEY_STOP:
             await self.request_media_state(terminal_id)
+
+    async def set_power(self, terminal_id: str, on: bool | None) -> bool:
+        """
+        Switch a box on (``True``), off (``False``), or the other way (``None``).
+
+        The box only has a power toggle, so power is pressed only when that
+        changes something. A box whose state is not known cannot be switched
+        safely - the press could just as well turn it off - so this returns
+        False and presses nothing. The exception is switching on: ``WAKE_STB``
+        wakes a box but never switches one off, so that goes out and succeeds.
+        """
+        box = self.boxes.get(terminal_id)
+        if box is None:
+            return False
+        if box.standby is None:
+            if on is not True:
+                return False
+            await self._send(terminal_id, "WAKE_STB", requires_stb=True)
+            return True
+        is_on = not box.standby
+        want_on = (not is_on) if on is None else on
+        if want_on == is_on:
+            return True
+        pressed = self._power_pressed.get(terminal_id)
+        if pressed is not None and pressed[1] == want_on and time.monotonic() - pressed[0] < POWER_SETTLE_S:
+            return True
+        self._power_pressed[terminal_id] = (time.monotonic(), want_on)
+        await self.send_key(terminal_id, KEY_POWER)
+        return True
 
     async def send_keycode(self, terminal_id: str, char: str) -> None:
         """Type a character (used for channel number digits)."""
