@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 136 320 240" width="320" height="240" role="img">
+  <title>FetchTV</title>
+  <polygon points="150,170 362,170 392,290 120,290" fill="#5d5d64"/>
+  <path d="M120 290H392V352Q392 362 382 362H130Q120 362 120 352Z" fill="#2a2a2e"/>
+  <line x1="120" y1="291.5" x2="392" y2="291.5" stroke="#76767d" stroke-width="3"/>
+  <rect x="196" y="306" width="30" height="16" rx="4" fill="#17171a"/>
+  <rect x="226" y="306" width="96" height="16" rx="5" fill="#3d7bff"/>
+  <g fill="#e4e4ea">
+    <ellipse cx="256" cy="252" rx="25" ry="18"/>
+    <ellipse cx="224" cy="224" rx="9" ry="12" transform="rotate(-22 224 224)"/>
+    <ellipse cx="244" cy="206" rx="9" ry="12" transform="rotate(-7 244 206)"/>
+    <ellipse cx="268" cy="206" rx="9" ry="12" transform="rotate(7 268 206)"/>
+    <ellipse cx="288" cy="224" rx="9" ry="12" transform="rotate(22 288 224)"/>
+  </g>
+</svg>
