@@ -60,6 +60,7 @@ import [`cosmos-compose.json`](cosmos-compose.json).
 | `UC_INTEGRATION_INTERFACE` | all | LAN address to announce, e.g. `192.168.1.50` (set it if the Remote can't find the driver) |
 | `UC_CONFIG_HOME` | `/config` | Where settings are saved |
 | `UC_LOG_LEVEL` | `INFO` | `DEBUG` for more detail |
+| `UC_FETCH_LEGACY_HANDSHAKE` | off | Set to `1` to introduce the driver to Fetch the way versions before 0.4.1 did (old headers, shared device id, plain cookie), instead of like the Fetch app. For telling whether a problem comes from that |
 | `UC_SESSION_GRACE_S` | `600` (`0` on the Remote) | Seconds the driver keeps its link to Fetch after the Remote sleeps or disconnects, so a Remote that wakes soon doesn't sign in again. `0` closes it at once |
 
 ## Entities and commands

@@ -19,6 +19,12 @@ back. While a box is unavailable, off and toggle are refused rather than
 guessed (the box only has a power toggle, so a blind press could switch it the
 wrong way), and on sends a wake, which never switches a box off.
 
+Since 0.4.1 the driver introduces itself to Fetch the way the Fetch Android app
+does (its headers, a per-install device id, the token in the websocket URL).
+If a box never answers although the Fetch app controls it, set
+`UC_FETCH_LEGACY_HANDSHAKE=1` and restart the driver to connect the way earlier
+versions did, and compare. The log says when it is on.
+
 When the Remote sleeps or you disconnect the integration, the driver keeps its
 link to Fetch for 10 minutes before closing it, so a Remote that comes back in
 that time does not sign in again. If every box is unavailable, check the

@@ -120,7 +120,18 @@ async def connect() -> None:
     if not code or not pin:
         _LOG.debug("Cannot connect: no Fetch account configured yet")
         return
-    await _start(client_factory(code, pin, device_id=config.get_device_id(), drm_id=config.get_drm_id()))
+    await _start(_new_client(code, pin))
+
+
+def _new_client(code: str, pin: str) -> fetchtv.FetchTvClient:
+    # UC_FETCH_LEGACY_HANDSHAKE: introduce the driver to Fetch the way versions
+    # before 0.4.1 did, to tell whether a problem comes from mirroring the app.
+    legacy = os.getenv("UC_FETCH_LEGACY_HANDSHAKE", "").strip().lower() in ("1", "true", "yes", "on")
+    if legacy:
+        _LOG.info("UC_FETCH_LEGACY_HANDSHAKE is set: connecting the way versions before 0.4.1 did")
+    return client_factory(
+        code, pin, device_id=config.get_device_id(), drm_id=config.get_drm_id(), legacy_handshake=legacy
+    )
 
 
 async def connect_for_setup(activation_code: str, pin: str) -> list[fetchtv.Box]:
@@ -132,9 +143,7 @@ async def connect_for_setup(activation_code: str, pin: str) -> list[fetchtv.Box]
     new client replaces any existing one and stays running, so there is only
     ever one connection for the lifetime of the driver.
     """
-    client = client_factory(
-        activation_code, pin, device_id=config.get_device_id(), drm_id=config.get_drm_id()
-    )
+    client = _new_client(activation_code, pin)
     boxes = await client.login()
     await disconnect()
     await _start(client)

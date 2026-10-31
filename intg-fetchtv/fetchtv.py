@@ -62,8 +62,22 @@ REQUEST_TIMEOUT_HEADER = "30"
 DEFAULT_DEVICE_ID = "uc-intg-fetchtv"
 
 
-def request_headers(device_id: str) -> dict[str, str]:
-    """The headers the app puts on every API request."""
+# What this driver sent until 0.4.0, before it mirrored the app (headers from
+# pyfetchtv, one device id for every install, no User-Agent of its own).
+# ``UC_FETCH_LEGACY_HANDSHAKE`` brings it back, to tell whether a problem comes
+# from the way the driver introduces itself to Fetch's service.
+_LEGACY_HEADERS = {
+    "Accept": "application/json",
+    "X-FTV-Capabilities": "no_pin,android,v3.21.1.4988,tenplay_v2",
+    "X-FTV-Timeout": "3",
+    "X-FTV-DeviceID": DEFAULT_DEVICE_ID,
+}
+
+
+def request_headers(device_id: str, legacy: bool = False) -> dict[str, str]:
+    """The headers the app puts on every API request (or, with ``legacy``, the old ones)."""
+    if legacy:
+        return dict(_LEGACY_HEADERS)
     return {
         "Accept": "application/json",
         "User-Agent": USER_AGENT,
@@ -559,9 +573,11 @@ class FetchTvClient:
         reconnect_delay: float = RECONNECT_DELAY_S,
         device_id: str = DEFAULT_DEVICE_ID,
         drm_id: str = "",
+        legacy_handshake: bool = False,
     ):
         self._device_id = device_id
         self._drm_id = drm_id
+        self._legacy = legacy_handshake
         self._activation_code = activation_code
         self._pin = pin
         self._api_base = api_base.rstrip("/")
@@ -1041,7 +1057,9 @@ class FetchTvClient:
         url = self._api_base + path
         if params:
             url += "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url, method=method, headers=request_headers(self._device_id))
+        req = urllib.request.Request(
+            url, method=method, headers=request_headers(self._device_id, self._legacy)
+        )
         if data is not None:
             req.data = urllib.parse.urlencode(data).encode()
             req.add_header("Content-Type", "application/x-www-form-urlencoded")
@@ -1102,20 +1120,28 @@ class FetchTvClient:
             )
 
     async def _run_socket(self) -> None:
-        # Connected the way the app does: the auth cookie in the URL, the
-        # capabilities and device id as headers, and no User-Agent.
-        url = f"{self._ws_url}?auth={urllib.parse.quote(self._cookies['auth'], safe='')}"
-        if self._drm_id:
-            url += f"&verimatrix_id={urllib.parse.quote(self._drm_id, safe='')}"
-        headers = request_headers(self._device_id)
+        if self._legacy:
+            # The way it connected until 0.4.0: just the auth cookie.
+            url = self._ws_url
+            options: dict[str, Any] = {"additional_headers": {"Cookie": f"auth={self._cookies['auth']}"}}
+        else:
+            # Connected the way the app does: the auth cookie in the URL, the
+            # capabilities and device id as headers, and no User-Agent.
+            url = f"{self._ws_url}?auth={urllib.parse.quote(self._cookies['auth'], safe='')}"
+            if self._drm_id:
+                url += f"&verimatrix_id={urllib.parse.quote(self._drm_id, safe='')}"
+            headers = request_headers(self._device_id)
+            options = {
+                "additional_headers": {k: headers[k] for k in ("X-FTV-Capabilities", "X-FTV-DeviceID")},
+                "user_agent_header": None,
+            }
         async with websockets.connect(
             url,
-            additional_headers={k: headers[k] for k in ("X-FTV-Capabilities", "X-FTV-DeviceID")},
-            user_agent_header=None,
             open_timeout=WS_OPEN_TIMEOUT_S,
             ping_interval=30,
             max_size=WS_MAX_MESSAGE_BYTES,
             logger=_WS_LOG,
+            **options,
         ) as ws:
             if not self._running:  # stop() came while the connection was being opened
                 return

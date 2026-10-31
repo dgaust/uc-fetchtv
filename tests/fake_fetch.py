@@ -258,7 +258,9 @@ class FakeFetch:
         if self.close_at_once:
             await ws.close()
             return
-        if self.expired or "auth=secret-token" not in ws.request.path:
+        # The token comes in the URL (as the app sends it) or as a cookie (as the driver did before 0.4.1).
+        authed = "auth=secret-token" in ws.request.path or "auth=secret-token" in (ws.request.headers.get("Cookie") or "")
+        if self.expired or not authed:
             await ws.close(code=4001)
             return
         self._clients.add(ws)
