@@ -29,6 +29,7 @@ from shared import loop as uc_loop  # noqa: E402
 
 # Distinctive values, so a match can only be a leak.
 CODE, PIN = "ACTSECRET7731", "PINSECRET4482"
+TYPED = "HUNTER2TYPED"  # text typed into a box (it can be a password)
 fake_fetch.ACTIVATION_CODE, fake_fetch.PIN = CODE, PIN
 
 
@@ -40,6 +41,8 @@ async def main():
     fake = fake_fetch.FakeFetch()
     await fake.start()
     box_manager.client_factory = fake.client
+    startup = io.StringIO()  # the driver's own start-up lines come before the handler below
+    logging.getLogger("driver").addHandler(logging.StreamHandler(startup))
     await driver.main()  # sets the logging up from UC_LOG_LEVEL
     logging.getLogger().addHandler(handler)
     logging.getLogger("websockets.server").setLevel(logging.WARNING)  # the fake service's side
@@ -74,6 +77,9 @@ async def main():
     lounge = next(e for e in entities if e.startswith("media_player."))
     await request("entity_command", {"entity_type": "media_player", "entity_id": lounge, "cmd_id": "channel_up"})
     await request("browse_media", {"entity_id": lounge, "media_id": "recordings", "paging": {"page": 1, "limit": 5}})
+    remote = next(e for e in entities if e.startswith("remote."))
+    await request("entity_command", {"entity_type": "remote", "entity_id": remote,
+                                     "cmd_id": "send_cmd", "params": {"command": "TYPE:" + TYPED}})
     await fake.drop_connections(code=1011)
     for _ in range(100):
         await asyncio.sleep(0.1)
@@ -88,7 +94,16 @@ async def main():
     assert "setup_data" in log or "FetchTV" in log, "nothing was logged, so the check proves nothing"
     assert len(log.splitlines()) > 30, len(log.splitlines())
     assert "\"redacted\": true" in log, "the setup request was not logged (or not redacted), so the check proves less"
-    for secret in (CODE, PIN, "secret-token", "WRONGPIN5521"):
+    # With debug on, the log shows what the driver does: start-up, HTTP calls (path only),
+    # the connection, every message each way, and each command with its outcome.
+    assert "FetchTV driver " in startup.getvalue() and "log level DEBUG" in startup.getvalue(), startup.getvalue()
+    assert "Debug logging is on" in startup.getvalue()
+    for expected in ("HTTP POST /v3/authenticate -> 200",
+                     "Connected to FetchTV's message service", " -> PING", " -> ARE_YOU_ALIVE", " -> MEDIA_STATE",
+                     " <- I_AM_ALIVE", " is reachable (first answer:", "Pushing media_player.",
+                     "Media player command channel_up for ", "Remote command send_cmd {'command': 'TYPE:<"):
+        assert expected in log, f"{expected!r} missing from the debug log"
+    for secret in (CODE, PIN, "secret-token", "WRONGPIN5521", TYPED):
         leaked = [line for line in log.splitlines() if secret in line]
         assert not leaked, f"{secret!r} reached the log:\n" + "\n".join(leaked[:5])
     with open(os.path.join(CONFIG_DIR, "config.json"), encoding="utf-8") as f:

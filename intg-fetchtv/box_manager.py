@@ -113,7 +113,9 @@ def register_cached_entities() -> None:
 
 async def connect() -> None:
     """Sign in with the saved account, if not already running."""
-    _cancel_grace()  # the Remote is back: the session it left running stays
+    if _grace_task is not None:
+        _LOG.debug("The Remote is back: keeping the FetchTV session that was left running")
+    _cancel_grace()
     if _client is not None:
         return
     code, pin = config.get_credentials()
@@ -195,6 +197,7 @@ def disconnect_later(grace_s: float | None = None) -> None:
 
 async def _disconnect_after(delay: float) -> None:
     await asyncio.sleep(delay)
+    _LOG.info("The Remote has been away for %.0f s: closing the FetchTV session", delay)
     await disconnect()
 
 
@@ -286,15 +289,25 @@ def _push_box(box: fetchtv.Box) -> None:
         _push_entity(eid, attrs)
 
 
+def _short(value: Any) -> Any:
+    """A value for the log: long ones (a source list, an image) as their size."""
+    text = str(value)
+    return value if len(text) <= 80 else f"<{len(text)} characters>"
+
+
 def _push_entity(eid: str, attrs: dict[str, Any]) -> None:
     # Only subscribed entities live in configured_entities; update_attributes()
     # would just log "not found" for the rest.
     if not api.configured_entities.contains(eid):
         return
     comparable = {k: v for k, v in attrs.items() if k not in _MOVING_ATTRS}
-    if _last_pushed.get(eid) == comparable:
+    previous = _last_pushed.get(eid)
+    if previous == comparable:
         return
     _last_pushed[eid] = comparable
+    if _LOG.isEnabledFor(logging.DEBUG):
+        changed = {k: v for k, v in comparable.items() if previous is None or previous.get(k) != v}
+        _LOG.debug("Pushing %s: %s", eid, {k: _short(v) for k, v in changed.items()})
     api.configured_entities.update_attributes(eid, attrs)
 
 

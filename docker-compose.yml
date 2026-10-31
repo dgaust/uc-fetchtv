@@ -19,6 +19,11 @@ services:
       # in its metadata isn't reconnected to correctly by the Remote.
       UC_INTEGRATION_HTTP_PORT: "10092"
       #
+      # DEBUG, INFO, WARNING or ERROR. Use DEBUG when troubleshooting: every message
+      # to and from the boxes is logged (never the activation code, PIN or typed
+      # text). Read it with: docker logs -f uc-fetchtv
+      UC_LOG_LEVEL: "INFO"
+      #
       # Optional. Only needed if the Remote has trouble finding the driver: set
       # it to this machine's LAN IP to pin the address the driver announces.
       # UC_INTEGRATION_INTERFACE: "192.168.1.50"

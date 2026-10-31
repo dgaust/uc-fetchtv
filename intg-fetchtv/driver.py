@@ -9,6 +9,7 @@ README.md for the architecture.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
+import json
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ import ucapi
 
 import box_manager
 import config
+import logsetup
 import setup_flow
 from shared import api, loop
 
@@ -33,6 +35,7 @@ async def on_connect() -> None:
     re-asserted explicitly - otherwise the integration card stays
     "Disconnected" despite a healthy connection.
     """
+    _LOG.debug("Remote event: connect")
     await box_manager.connect()
     await box_manager.report_device_state()
 
@@ -40,18 +43,21 @@ async def on_connect() -> None:
 @api.listens_to(ucapi.Events.DISCONNECT)
 async def on_disconnect() -> None:
     """Remote wants us to disconnect: close the FetchTV connection after a grace period."""
+    _LOG.debug("Remote event: disconnect")
     box_manager.disconnect_later()
 
 
 @api.listens_to(ucapi.Events.ENTER_STANDBY)
 async def on_enter_standby() -> None:
     """Remote entered standby: close the connection after a grace period, not at once."""
+    _LOG.debug("Remote event: enter_standby")
     box_manager.disconnect_later()
 
 
 @api.listens_to(ucapi.Events.EXIT_STANDBY)
 async def on_exit_standby() -> None:
     """Remote woke up: reconnect and re-assert device state."""
+    _LOG.debug("Remote event: exit_standby")
     await box_manager.connect()
     await box_manager.report_device_state()
 
@@ -64,12 +70,23 @@ async def on_subscribe_entities(entity_ids: list[str]) -> None:
     box_manager.push_subscribed_state(entity_ids)
 
 
+def _driver_version() -> str:
+    try:
+        with open("driver.json", encoding="utf-8") as f:
+            return str(json.load(f).get("version", "?"))
+    except (OSError, ValueError):
+        return "?"
+
+
 def _redact_setup_data(record: logging.LogRecord) -> bool:
-    """Blank the activation code and PIN out of ucapi's message logging."""
+    """Blank the activation code, PIN and typed text out of ucapi's message logging."""
     message = record.getMessage()
     if "setup_data" in message:
-        record.msg = re.sub(r'("setup_data"\s*:\s*)\{[^}]*\}', r'\1{"redacted": true}', message)
-        record.args = None
+        message = re.sub(r'("setup_data"\s*:\s*)\{[^}]*\}', r'\1{"redacted": true}', message)
+        record.msg, record.args = message, None
+    # Text typed into a box (a TYPE: command) can be a password.
+    if "TYPE:" in message:
+        record.msg, record.args = re.sub(r'"TYPE:[^"]*"', '"TYPE:<redacted>"', message), None
     return True
 
 
@@ -79,18 +96,30 @@ async def main() -> None:
         format="%(asctime)s.%(msecs)03d %(levelname)-5s %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    level = os.getenv("UC_LOG_LEVEL", "INFO").upper()
-    for name in ("driver", "box_manager", "setup_flow", "entities", "remote_entity", "sensors", "config", "fetchtv"):
-        logging.getLogger(name).setLevel(level)
     # ucapi logs every websocket message at DEBUG, including the setup request
-    # that carries the activation code and PIN. Keep it quiet unless asked for,
-    # and never let those two values reach the log.
-    ucapi_log = logging.getLogger("ucapi")
-    ucapi_log.setLevel(level if level == "DEBUG" else "INFO")
-    logging.getLogger("ucapi.api").setLevel(ucapi_log.level)
+    # that carries the activation code and PIN, and any typed text. Keep it quiet
+    # unless asked for, and never let those values reach the log.
     logging.getLogger("ucapi.api").addFilter(_redact_setup_data)
+    env_level, bad_level = logsetup.environment_level()
+    logsetup.apply(env_level or "INFO")  # until the saved settings are read
 
     config.init(api.config_dir_path)
+
+    level = logsetup.choose()
+    logsetup.apply(level)
+    _LOG.info(
+        "FetchTV driver %s starting (log level %s from %s, config in %s, session grace %.0f s, %s handshake)",
+        _driver_version(),
+        level,
+        logsetup.source(),
+        api.config_dir_path,
+        box_manager.SESSION_GRACE_S,
+        "original" if os.getenv("UC_FETCH_LEGACY_HANDSHAKE", "").strip().lower() in ("1", "true", "yes", "on") else "app-style",
+    )
+    if bad_level:
+        _LOG.warning("Ignoring UC_LOG_LEVEL=%r: use DEBUG, INFO, WARNING or ERROR", os.getenv("UC_LOG_LEVEL"))
+    if level == "DEBUG":
+        _LOG.info("Debug logging is on: every message to and from the boxes is logged (sign-in details and typed text are not)")
 
     # Register entities from the cached box list BEFORE starting the API
     # server, so they are already available when the Remote reconnects and

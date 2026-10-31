@@ -32,6 +32,11 @@ To update, upload the newer file with **Update existing driver** ticked
 in the web configurator, and re-add a media player or remote to get new
 features.
 
+**Debug logging.** The Remote has no log level setting for a driver, so run the
+FetchTV setup again and tick **Debug logging**, then download the log from
+**Settings → Development: Logs** in the web configurator. Untick it afterwards.
+See [Logs and debugging](docs/troubleshooting.md#logs-and-debugging).
+
 ### In Docker
 
 ```yaml
@@ -43,6 +48,7 @@ services:
     network_mode: host   # required so the Remote can discover it
     environment:
       UC_INTEGRATION_HTTP_PORT: "10092"
+      UC_LOG_LEVEL: "INFO"   # DEBUG when troubleshooting (see below)
     volumes:
       - ./config:/config
 ```
@@ -51,15 +57,48 @@ services:
 docker compose up -d
 ```
 
-Then **Integrations → Add new** on the Remote and pick FetchTV. For Cosmos,
-import [`cosmos-compose.json`](cosmos-compose.json).
+Then **Integrations → Add new** on the Remote and pick FetchTV.
+
+**Debug logging.** Set `UC_LOG_LEVEL` to `DEBUG` in the compose file and recreate
+the container with `docker compose up -d`. Then read the log:
+
+```bash
+docker logs -f uc-fetchtv
+```
+
+Add `--since 10m` to see only the last ten minutes. Set it back to `INFO` when
+you're done: debug logs every message to and from the boxes. Your activation
+code, PIN and anything you type into a box are never logged. See
+[Logs and debugging](docs/troubleshooting.md#logs-and-debugging) for what to
+look for.
+
+### In Cosmos Cloud
+
+1. In Cosmos, go to **ServApps** and choose **Import Compose File**. Paste the
+   contents of [`cosmos-compose.json`](cosmos-compose.json), pick where to keep
+   the driver's settings, and install. It runs with host networking, restarts
+   automatically and updates itself when a new image is published.
+2. The app has no web page, so Cosmos creates no URL for it. On the Remote go to
+   **Integrations → Add new**, pick FetchTV and enter your activation code and PIN.
+3. If the Remote can't find the driver, open the container's **Docker** tab, add
+   an environment variable `UC_INTEGRATION_INTERFACE` set to the Cosmos server's
+   LAN IP, and press **Update Container**.
+
+To update by hand, open the container's **Overview** and press the update arrow
+(it pulls the newest image and recreates the container).
+
+**Debug logging.** Open the container's **Docker** tab, set the environment variable
+`UC_LOG_LEVEL` to `DEBUG` (add it if it isn't listed), and press **Update
+Container**. The output is on the container's **Logs** tab. Set it back to `INFO`
+afterwards. Note that a container update or recreate clears the Logs tab, so
+reproduce the problem after switching to `DEBUG`.
 
 | Variable | Default | |
 | --- | --- | --- |
 | `UC_INTEGRATION_HTTP_PORT` | `10092` | Port the driver listens on |
 | `UC_INTEGRATION_INTERFACE` | all | LAN address to announce, e.g. `192.168.1.50` (set it if the Remote can't find the driver) |
 | `UC_CONFIG_HOME` | `/config` | Where settings are saved |
-| `UC_LOG_LEVEL` | `INFO` | `DEBUG` for more detail |
+| `UC_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. `DEBUG` logs every message to and from the boxes |
 | `UC_FETCH_LEGACY_HANDSHAKE` | off | Set to `1` to introduce the driver to Fetch the way versions before 0.4.1 did (old headers, shared device id, plain cookie), instead of like the Fetch app. For telling whether a problem comes from that |
 | `UC_SESSION_GRACE_S` | `600` (`0` on the Remote) | Seconds the driver keeps its link to Fetch after the Remote sleeps or disconnects, so a Remote that wakes soon doesn't sign in again. `0` closes it at once |
 

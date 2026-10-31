@@ -493,11 +493,16 @@ def _make_cmd_handler(terminal_id: str, get_client: ClientGetter):
     ) -> StatusCodes:
         client = get_client()
         box = client.boxes.get(terminal_id) if client else None
+        label = fetchtv.describe_command(cmd_id, params)
         if client is None or box is None or not client.connected:
+            _LOG.debug("Media player command %s for %s: not connected to FetchTV (503)", label, terminal_id)
             return StatusCodes.SERVICE_UNAVAILABLE
         try:
-            return await _run_command(client, box, cmd_id, params or {})
+            result = await _run_command(client, box, cmd_id, params or {})
+            _LOG.debug("Media player command %s for %s -> %s", label, box.name, result.name)
+            return result
         except fetchtv.NotConnectedError:
+            _LOG.debug("Media player command %s for %s: connection closed while sending (503)", label, box.name)
             return StatusCodes.SERVICE_UNAVAILABLE
         except Exception:  # noqa: BLE001 - answer the Remote rather than leave it waiting
             _LOG.exception("Command %s failed", cmd_id)
@@ -512,11 +517,16 @@ def _make_select_handler(terminal_id: str, get_client: ClientGetter):
     ) -> StatusCodes:
         client = get_client()
         box = client.boxes.get(terminal_id) if client else None
+        label = fetchtv.describe_command(cmd_id, params)
         if client is None or box is None or not client.connected:
+            _LOG.debug("Channel select command %s for %s: not connected to FetchTV (503)", label, terminal_id)
             return StatusCodes.SERVICE_UNAVAILABLE
         try:
-            return await _run_select_command(client, box, cmd_id, params or {})
+            result = await _run_select_command(client, box, cmd_id, params or {})
+            _LOG.debug("Channel select command %s for %s -> %s", label, box.name, result.name)
+            return result
         except fetchtv.NotConnectedError:
+            _LOG.debug("Channel select command %s for %s: connection closed while sending (503)", label, box.name)
             return StatusCodes.SERVICE_UNAVAILABLE
         except Exception:  # noqa: BLE001 - answer the Remote rather than leave it waiting
             _LOG.exception("Select command %s failed", cmd_id)

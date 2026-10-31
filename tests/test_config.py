@@ -28,6 +28,19 @@ assert str(uuid.UUID(drm_id)) == drm_id
 config.init(folder)
 assert config.get_drm_id() == drm_id and config.get_device_id() == device_id
 
+# The Debug logging option from the setup screen is kept across restarts, and
+# saving the account does not lose it.
+assert config.get_debug_logging() is False
+config.set_debug_logging(True)
+config.init(folder)
+assert config.get_debug_logging() is True and config.get_device_id() == device_id
+config.set_account("code", "1234", [{"terminal_id": "1|aa", "name": "Lounge"}])
+config.init(folder)
+assert config.get_debug_logging() is True
+config.set_debug_logging(False)
+config.init(folder)
+assert config.get_debug_logging() is False
+
 # A separate install gets its own.
 other = tempfile.mkdtemp()
 config.init(other)

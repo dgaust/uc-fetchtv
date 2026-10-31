@@ -28,16 +28,18 @@ _pin: str | None = None
 _boxes: list[dict] = []
 _device_id: str | None = None
 _drm_id: str | None = None
+_debug_logging: bool = False
 
 
 def init(config_dir: str) -> None:
     """Set the configuration directory and load any existing configuration."""
-    global _config_path, _activation_code, _pin, _boxes, _device_id, _drm_id
+    global _config_path, _activation_code, _pin, _boxes, _device_id, _drm_id, _debug_logging
     _config_path = os.path.join(config_dir, _FILENAME)
     _LOG.info("Config file: %s", _config_path)
     _activation_code, _pin, _boxes = _load()
     _device_id = _load_device_id()
     _drm_id = _load_value("drm_id")
+    _debug_logging = _read().get("debug_logging") is True
     if is_configured():
         _LOG.info("Loaded saved config: %d cached box(es)", len(_boxes))
     else:
@@ -108,6 +110,18 @@ def get_drm_id() -> str:
     return _drm_id
 
 
+def get_debug_logging() -> bool:
+    """True if the setup screen's Debug logging option was ticked."""
+    return _debug_logging
+
+
+def set_debug_logging(enabled: bool) -> None:
+    """Persist the Debug logging option."""
+    global _debug_logging
+    _debug_logging = bool(enabled)
+    _write()
+
+
 def is_configured() -> bool:
     """True once an activation code and PIN have been saved."""
     return bool(_activation_code and _pin)
@@ -148,7 +162,7 @@ def _write() -> None:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump({"activation_code": _activation_code, "pin": _pin, "boxes": _boxes,
-                       "device_id": _device_id, "drm_id": _drm_id}, f)
+                       "device_id": _device_id, "drm_id": _drm_id, "debug_logging": _debug_logging}, f)
             f.flush()
             # The sandboxed custom-driver process can be killed shortly after a
             # setup completes - fsync so the write survives that.

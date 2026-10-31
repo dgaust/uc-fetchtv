@@ -6,9 +6,11 @@ entities come back from the saved box cache before sign-in.
 """
 import asyncio
 import json
+import logging
 import os
 import tempfile
 
+os.environ.pop("UC_LOG_LEVEL", None)  # the level is under test: it comes from the setup screen here
 os.environ["UC_DISABLE_MDNS_PUBLISH"] = "true"
 os.environ["UC_INTEGRATION_HTTP_PORT"] = "9098"
 CONFIG_DIR = tempfile.mkdtemp()
@@ -152,6 +154,17 @@ async def main():
                                                 "cmd_id": "on"})
         assert resp["code"] == 200
         assert fake.received("KEYEVENT", BEDROOM)[-1]["message"]["keyName"] == "KEY_POWER"
+
+        # The Debug logging tick box on the setup screen turns debug logging on and off
+        # (a driver on the Remote cannot set UC_LOG_LEVEL), and the choice is kept.
+        assert logging.getLogger("fetchtv").level == logging.INFO and not config.get_debug_logging()
+        for ticked, expected in (("true", logging.DEBUG), ("false", logging.INFO)):
+            await request("setup_driver", {"setup_data": {"activation_code": ACTIVATION_CODE, "pin": PIN,
+                                                          "debug_logging": ticked}})
+            await wait_event(lambda e: e["msg"] == "driver_setup_change" and e["msg_data"].get("state") == "OK")
+            assert logging.getLogger("fetchtv").level == expected, (ticked, logging.getLogger("fetchtv").level)
+            assert config.get_debug_logging() is (ticked == "true")
+            assert logging.getLogger("ucapi.api").level == (logging.DEBUG if ticked == "true" else logging.INFO)
 
         # The Remote going away keeps the FetchTV session for a grace period:
         # back in time it does not sign in again; away for good it is closed.

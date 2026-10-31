@@ -24,7 +24,8 @@
       "NetworkMode": "host",
       "network_mode": "host",
       "environment": [
-        "UC_INTEGRATION_HTTP_PORT=10092"
+        "UC_INTEGRATION_HTTP_PORT=10092",
+        "UC_LOG_LEVEL=INFO"
       ],
       "volumes": [
         {

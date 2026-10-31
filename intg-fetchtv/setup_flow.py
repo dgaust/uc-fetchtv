@@ -24,6 +24,7 @@ import box_manager
 import config
 import entities as ent
 import fetchtv
+import logsetup
 import remote_entity
 import sensors
 from shared import api
@@ -38,8 +39,24 @@ async def driver_setup_handler(msg: SetupDriver) -> SetupAction:
     return SetupError(error_type=IntegrationSetupError.OTHER)
 
 
+def _apply_debug_option(msg: DriverSetupRequest) -> None:
+    """
+    Take the Debug logging tick box from the setup screen, first, so a setup that fails is logged too.
+
+    It is the only way to turn debug logging on for a driver installed on the
+    Remote (which cannot set environment variables); ``UC_LOG_LEVEL`` still wins.
+    """
+    debug = str(msg.setup_data.get("debug_logging", "")).strip().lower() == "true"
+    if debug == config.get_debug_logging():
+        return
+    config.set_debug_logging(debug)
+    logsetup.apply(logsetup.choose())
+    _LOG.info("Debug logging turned %s on the setup screen (log level now %s)", "on" if debug else "off", logsetup.choose())
+
+
 async def _handle_setup(msg: DriverSetupRequest) -> SetupAction:
-    code = (msg.setup_data.get("activation_code") or "").strip()
+    _apply_debug_option(msg)
+    code =(msg.setup_data.get("activation_code") or "").strip()
     pin = (msg.setup_data.get("pin") or "").strip()
     if not code or not pin:
         return SetupError(error_type=IntegrationSetupError.AUTHORIZATION_ERROR)

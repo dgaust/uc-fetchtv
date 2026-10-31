@@ -53,6 +53,17 @@
             "value": ""
           }
         }
+      },
+      {
+        "id": "debug_logging",
+        "label": {
+          "en": "Debug logging (for troubleshooting: logs every message to and from the boxes)"
+        },
+        "field": {
+          "checkbox": {
+            "value": false
+          }
+        }
       }
     ]
   },

@@ -136,6 +136,11 @@ GUIDE_RETRY_S = 30.0
 NO_LISTINGS_RETRY_S = 120.0
 # The most often the service is signed in to again because an API call was refused.
 RELOGIN_MIN_INTERVAL_S = 60.0
+# Message fields that are written to the DEBUG log when sent (never anything that
+# could identify the account).
+_LOGGED_FIELDS = ("keyName", "keyCode", "channelId", "assetType", "recordingId", "programId", "volume")
+# A connected box that has said nothing for this long is reported once at WARNING.
+SILENCE_WARNING_S = 300.0
 # A PING subscribes the sender to a box's events for four hours; the Fetch app
 # sends it again after 14,380 s (just under that) whenever it is connected.
 SUBSCRIPTION_RENEW_S = 14380.0
@@ -287,6 +292,10 @@ class Box:
     scheduled_count: int = 0
     active_recording_ids: list[str] = field(default_factory=list)
     storage_info: Any = None
+    # Monotonic time of the box's last message on this connection, and whether
+    # its silence has been reported (so the log says so once, and when it ends).
+    last_heard: float | None = None
+    silence_reported: bool = False
 
     @property
     def has_state(self) -> bool:
@@ -735,21 +744,29 @@ class FetchTvClient:
         wakes a box but never switches one off, so that goes out and succeeds.
         """
         box = self.boxes.get(terminal_id)
+        wanted = {True: "on", False: "off", None: "toggle"}[on]
         if box is None:
+            _LOG.debug("Power %s asked of unknown box %s: refused", wanted, terminal_id)
             return False
         if box.standby is None:
             if on is not True:
+                _LOG.debug("Power %s asked of %s while its state is unknown: refused (no blind press)", wanted, box.name)
                 return False
+            _LOG.debug("Power on asked of %s while its state is unknown: sending a wake instead of a press", box.name)
             await self._send(terminal_id, "WAKE_STB", requires_stb=True)
             return True
         is_on = not box.standby
         want_on = (not is_on) if on is None else on
         if want_on == is_on:
+            _LOG.debug("Power %s asked of %s, which is already %s: nothing to do", wanted, box.name, "on" if is_on else "off")
             return True
         pressed = self._power_pressed.get(terminal_id)
         if pressed is not None and pressed[1] == want_on and time.monotonic() - pressed[0] < POWER_SETTLE_S:
+            _LOG.debug("Power %s asked of %s again %.1f s after the last press: dropped", wanted, box.name,
+                       time.monotonic() - pressed[0])
             return True
         self._power_pressed[terminal_id] = (time.monotonic(), want_on)
+        _LOG.debug("Power %s asked of %s (now %s): pressing power", wanted, box.name, "on" if is_on else "off")
         await self.send_key(terminal_id, KEY_POWER)
         return True
 
@@ -769,13 +786,17 @@ class FetchTvClient:
         box = self.boxes.get(terminal_id)
         if box is None or box.standby is not True:
             return True
+        _LOG.debug("%s is in standby: waking it", box.name)
+        started = time.monotonic()
         await self._send(terminal_id, "WAKE_STB", requires_stb=True)
-        deadline = time.monotonic() + (WAKE_TIMEOUT_S if timeout_s is None else timeout_s)
+        deadline = started + (WAKE_TIMEOUT_S if timeout_s is None else timeout_s)
         while time.monotonic() < deadline:
             await asyncio.sleep(WAKE_POLL_S)
             if box.standby is not True:
+                _LOG.debug("%s woke up after %.1f s", box.name, time.monotonic() - started)
                 return True
             await self.request_media_state(terminal_id)
+        _LOG.debug("%s still in standby after %.1f s", box.name, time.monotonic() - started)
         return False
 
     async def _play(self, terminal_id: str, msg_type: str, extra: dict[str, Any]) -> None:
@@ -1101,8 +1122,16 @@ class FetchTvClient:
             req.add_header("Content-Type", "application/x-www-form-urlencoded")
         if self._cookies:
             req.add_header("Cookie", "; ".join(f"{k}={v}" for k, v in self._cookies.items()))
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
-            return resp.status, resp.headers, json.loads(resp.read())
+        started = time.monotonic()
+        try:
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+                result = resp.status, resp.headers, json.loads(resp.read())
+        except Exception as ex:
+            # (the path only: the query and the form body carry the sign-in details)
+            _LOG.debug("HTTP %s %s failed after %.0f ms: %s", method, path, (time.monotonic() - started) * 1000, ex)
+            raise
+        _LOG.debug("HTTP %s %s -> %s (%.0f ms)", method, path, result[0], (time.monotonic() - started) * 1000)
+        return result
 
     async def _api(self, method: str, path: str, **kwargs: Any) -> tuple[int, Any, Any]:
         """
@@ -1183,6 +1212,11 @@ class FetchTvClient:
                 return
             self._ws = ws
             self._connected_since = time.monotonic()
+            _LOG.info(
+                "Connected to FetchTV's message service (%s handshake, %d box(es))",
+                "original" if self._legacy else "app-style",
+                len(self.boxes),
+            )
             await self._set_connected(True)
             poller = asyncio.create_task(self._poll())
             try:
@@ -1192,6 +1226,12 @@ class FetchTvClient:
                         await self._on_message(raw)
                     except Exception:  # noqa: BLE001 - one odd message must not cost the connection
                         _LOG.warning("Ignored a message that could not be handled", exc_info=True)
+                _LOG.info(
+                    "FetchTV closed the connection (code %s, reason %r) after %.0f s",
+                    ws.close_code,
+                    ws.close_reason,
+                    time.monotonic() - self._connected_since,
+                )
             finally:
                 poller.cancel()
                 self._ws = None
@@ -1200,6 +1240,8 @@ class FetchTvClient:
                 self._pinged_at.clear()
                 for box in self.boxes.values():
                     box.online = False
+                    box.last_heard = None
+                    box.silence_reported = False
 
     async def _poll(self) -> None:
         while True:
@@ -1208,7 +1250,10 @@ class FetchTvClient:
                     # A box that has not answered is pinged every round; one that
                     # has is pinged again only when the last one is about to lapse.
                     now = time.monotonic()
+                    self._check_silence(box, now)
                     if not box.online or now - self._pinged_at.get(tid, -SUBSCRIPTION_RENEW_S) >= SUBSCRIPTION_RENEW_S:
+                        if box.online:
+                            _LOG.debug("%s: renewing the event subscription", box.name)
                         self._pinged_at[tid] = now
                         await self.ping(tid)
                     if not box.online:
@@ -1220,6 +1265,21 @@ class FetchTvClient:
                 except NotConnectedError:
                     return
             await asyncio.sleep(self._poll_interval)
+
+    def _check_silence(self, box: Box, now: float) -> None:
+        """Say so, once, when a connected box has gone quiet - the first thing to know when it shows as unavailable."""
+        since = box.last_heard if box.last_heard is not None else self._connected_since
+        if since is None or box.silence_reported or now - since < SILENCE_WARNING_S:
+            return
+        box.silence_reported = True
+        _LOG.warning(
+            "No message from %s for %.0f s although connected to FetchTV (pinged every %.0f s): "
+            "the box may be off the network, or its own link to Fetch may have dropped "
+            "(retrying in the Fetch app brings it back)",
+            box.name,
+            now - since,
+            self._poll_interval,
+        )
 
     async def _on_message(self, raw: str | bytes) -> None:
         try:
@@ -1238,6 +1298,13 @@ class FetchTvClient:
             return
         data = body.get("data") or {}
         _LOG.debug("%s <- %s", box.name, msg_type)
+        now = time.monotonic()
+        if box.silence_reported:
+            quiet_since = box.last_heard if box.last_heard is not None else self._connected_since
+            _LOG.info("%s is answering again after %.0f s", box.name, now - (quiet_since or now))
+            box.silence_reported = False
+        box.last_heard = now
+        was_online, was_standby = box.online, box.standby
 
         if msg_type == "I_AM_ALIVE":
             box.apply_alive(data)
@@ -1274,6 +1341,10 @@ class FetchTvClient:
             # when working out a message the box sends (command errors, say).
             _LOG.debug("%s <- %s data: %s", box.name, msg_type, data)
             return
+        if box.online and not was_online:
+            _LOG.info("%s is reachable (first answer: %s)", box.name, msg_type)
+        if box.standby != was_standby:
+            _LOG.info("%s: %s", box.name, "in standby" if box.standby else "awake")
         await self._notify(box)
 
     def _request_report_soon(self, box: Box) -> None:
@@ -1323,6 +1394,16 @@ class FetchTvClient:
             if isinstance(extra.get("data"), dict):
                 message["data"].update(extra.pop("data"))
             message.update(extra)
+        if _LOG.isEnabledFor(logging.DEBUG):
+            box = self.boxes.get(terminal_id)
+            detail = {k: v for k, v in message.items() if k in _LOGGED_FIELDS}
+            _LOG.debug(
+                "%s -> %s%s%s",
+                box.name if box else terminal_id,
+                msg_type,
+                " (held if the box is offline)" if queueable else "",
+                f" {detail}" if detail else "",
+            )
         try:
             await ws.send(json.dumps({"to": terminal_id, "message": message}))
         except websockets.ConnectionClosed as ex:
@@ -1346,6 +1427,16 @@ class FetchTvClient:
                     await result
             except Exception:  # noqa: BLE001
                 _LOG.exception("FetchTV update callback failed")
+
+
+def describe_command(cmd_id: str, params: dict[str, Any] | None) -> str:
+    """A command and its parameters for the log - without the text of a typed string (it can be a password)."""
+    shown = {}
+    for key, value in (params or {}).items():
+        if isinstance(value, str) and value.startswith("TYPE:"):
+            value = f"TYPE:<{len(value) - 5} characters>"
+        shown[key] = value
+    return f"{cmd_id} {shown}" if shown else cmd_id
 
 
 def _now_ms() -> int:
