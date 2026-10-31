@@ -135,12 +135,17 @@ async def disconnect() -> None:
     _client = _client_task = _refresh_task = None
     if refresh is not None:
         refresh.cancel()
-    if client is not None:
-        _LOG.info("Disconnecting from FetchTV")
-        await client.stop()
-    if task is not None:
-        task.cancel()
-    await api.set_device_state(ucapi.DeviceStates.DISCONNECTED)
+    try:
+        if client is not None:
+            _LOG.info("Disconnecting from FetchTV")
+            await client.stop()
+    finally:
+        if task is not None:
+            task.cancel()
+    # Closing the old connection can take a while. If a new one was started
+    # meanwhile (the Remote woke straight after sleeping), it is not disconnected.
+    if _client is None:
+        await api.set_device_state(ucapi.DeviceStates.DISCONNECTED)
 
 
 def push_subscribed_state(entity_ids: list[str]) -> None:
@@ -179,12 +184,12 @@ async def _refresh_periodically() -> None:
             continue
         try:
             await client.prefetch_programs()
-        except Exception:  # noqa: BLE001 - never let a guide hiccup stop the refresh loop
-            _LOG.exception("Guide prefetch failed")
-        for box in list(client.boxes.values()):
-            if box.has_state and not box.standby:
-                await client.refresh_program(box)
-            _push_box(box)
+            for box in list(client.boxes.values()):
+                if box.has_state and not box.standby:
+                    await client.refresh_program(box)
+                _push_box(box)
+        except Exception:  # noqa: BLE001 - never let a hiccup stop the refresh loop
+            _LOG.exception("Periodic refresh failed")
 
 
 def _ensure_entity(terminal_id: str, name: str) -> None:

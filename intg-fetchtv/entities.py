@@ -236,7 +236,7 @@ async def browse_channels(
         chunk, pagination = page_of(folders)
         root = BrowseMediaItem(
             media_id=_ROOT,
-            title=box.name,
+            title=_clip(box.name),
             media_class=MediaClass.DIRECTORY,
             can_browse=True,
             items=chunk,
@@ -280,7 +280,7 @@ async def browse_channels(
         pagination = Pagination(page=paging.page, limit=len(chunk), count=len(entries))
         folder = BrowseMediaItem(
             media_id=media_id,
-            title=title,
+            title=_clip(title),
             media_class=MediaClass.DIRECTORY,
             can_browse=True,
             items=chunk,
@@ -288,6 +288,22 @@ async def browse_channels(
         return BrowseResults(media=folder, pagination=pagination)
 
     return StatusCodes.NOT_FOUND
+
+
+def _clip(text: str, limit: int = 255) -> str:
+    """``text`` cut to what the Remote accepts in a browse item (255 characters), never empty."""
+    text = text.strip() or "-"
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _day(start_ms: int) -> str:
+    """The recording's day, like "Sat 14 Nov"; empty if the time is missing or not a real date."""
+    if start_ms <= 0:
+        return ""
+    try:
+        return datetime.fromtimestamp(start_ms / 1000, timezone.utc).astimezone().strftime("%a %d %b")
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def _newest_first(recordings: list[fetchtv.Recording]) -> list[fetchtv.Recording]:
@@ -325,7 +341,7 @@ def _series_item(episodes: list[fetchtv.Recording], logo: str | None) -> BrowseM
     latest = episodes[0]
     return BrowseMediaItem(
         media_id=f"{_SERIES_PREFIX}{latest.series_id}",
-        title=latest.title,
+        title=_clip(latest.title),
         subtitle=f"{len(episodes)} recordings",
         media_class=MediaClass.DIRECTORY,
         can_browse=True,
@@ -335,14 +351,11 @@ def _series_item(episodes: list[fetchtv.Recording], logo: str | None) -> BrowseM
 
 def _recording_item(recording: fetchtv.Recording, logo: str | None) -> BrowseMediaItem:
     """A recording as a list entry; playing it tells the box to play it."""
-    when = ""
-    if recording.start_ms:
-        when = datetime.fromtimestamp(recording.start_ms / 1000, timezone.utc).astimezone().strftime("%a %d %b")
-    subtitle = " · ".join(part for part in (recording.label, when) if part) or None
+    subtitle = " · ".join(part for part in (recording.label, _day(recording.start_ms)) if part) or None
     return BrowseMediaItem(
         media_id=f"{_RECORDING_PREFIX}{recording.id}",
-        title=recording.title,
-        subtitle=subtitle,
+        title=_clip(recording.title),
+        subtitle=_clip(subtitle) if subtitle else None,
         media_class=MediaClass.EPISODE if recording.episode else MediaClass.VIDEO,
         media_type=MediaContentType.EPISODE if recording.episode else MediaContentType.VIDEO,
         can_play=True,
@@ -352,13 +365,13 @@ def _recording_item(recording: fetchtv.Recording, logo: str | None) -> BrowseMed
 
 def _channel_item(channel: fetchtv.Channel, program: Program | None) -> BrowseMediaItem:
     # What is on now, or the channel number when the guide has nothing.
-    if program and program.title:
-        subtitle = program.title
+    if program and program.title.strip():
+        subtitle = _clip(program.title)
     else:
         subtitle = str(channel.number) if channel.number else None
     return BrowseMediaItem(
         media_id=channel.id,
-        title=channel.name,
+        title=_clip(channel.name),
         subtitle=subtitle,
         media_class=MediaClass.CHANNEL,
         media_type=MediaContentType.CHANNEL,
@@ -486,6 +499,9 @@ def _make_cmd_handler(terminal_id: str, get_client: ClientGetter):
             return await _run_command(client, box, cmd_id, params or {})
         except fetchtv.NotConnectedError:
             return StatusCodes.SERVICE_UNAVAILABLE
+        except Exception:  # noqa: BLE001 - answer the Remote rather than leave it waiting
+            _LOG.exception("Command %s failed", cmd_id)
+            return StatusCodes.SERVER_ERROR
 
     return _handler
 
@@ -502,6 +518,9 @@ def _make_select_handler(terminal_id: str, get_client: ClientGetter):
             return await _run_select_command(client, box, cmd_id, params or {})
         except fetchtv.NotConnectedError:
             return StatusCodes.SERVICE_UNAVAILABLE
+        except Exception:  # noqa: BLE001 - answer the Remote rather than leave it waiting
+            _LOG.exception("Select command %s failed", cmd_id)
+            return StatusCodes.SERVER_ERROR
 
     return _handler
 
@@ -546,8 +565,10 @@ async def _run_command(
             return StatusCodes.BAD_REQUEST
         await client.set_volume(tid, level)
     elif cmd_id in (Cmd.VOLUME_UP, Cmd.VOLUME_DOWN):
+        if box.volume is None:  # a step needs a level to start from
+            return StatusCodes.SERVICE_UNAVAILABLE
         step = VOLUME_STEP if cmd_id == Cmd.VOLUME_UP else -VOLUME_STEP
-        await client.set_volume(tid, (box.volume or 0) + step)
+        await client.set_volume(tid, box.volume + step)
     elif cmd_id == Cmd.TOGGLE:
         await client.send_key(tid, fetchtv.KEY_POWER)
     elif cmd_id in (Cmd.ON, Cmd.OFF):

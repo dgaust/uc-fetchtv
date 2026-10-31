@@ -16,7 +16,7 @@ drops its link to Fetch until the Remote reconnects. Wake the Remote or
 reconnect the integration. If that doesn't help, check the driver's log for a
 connection from the Remote.
 
-**A new entity or feature is missing after an update.** See Updating above.
+**A new entity or feature is missing after an update.** After an update that adds entities, add them in the Remote's web configurator, and re-add a media player or remote to get new features (see "To update" in the [README](../README.md)).
 
 **Changing channel with the box's own IR remote doesn't show straight away.**
 The driver learns of changes from what the box reports to Fetch's service. That
@@ -46,4 +46,8 @@ exposes locally.
   itself loads channel logos from `www.fetchtv.com.au`. There is no analytics
   or other third party.
 - The driver's websocket on the Remote's own network has no password, like
-  other Unfolded Circle drivers. Run it only on a network you trust.
+  other Unfolded Circle drivers. Anyone who can reach its port can send keys
+  to your boxes, type text, play things, and even run the setup again with
+  another account. Run it only on a network you trust, and with Docker set
+  `UC_INTEGRATION_INTERFACE` to the server's LAN address so it listens only
+  there.

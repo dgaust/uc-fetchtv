@@ -30,6 +30,16 @@ channel browser and select), the remote entity (commands and default layout),
 and the driver end to end over the Remote's websocket API. CI runs them on
 every push.
 
+The `test_stress_*.py` scripts push harder: many rapid and concurrent commands,
+wake-then-play races, reconnect storms, malformed and oversized messages from
+the service, thousands of recordings and hundreds of channels, sign-in and guide
+failures, the Remote connecting and disconnecting over and over, and a
+time-compressed soak. They take the fake service's failure knobs from
+`tests/fake_fetch.py` (`http_status`, `http_body`, `http_delay`, `expired`,
+`wakes`, `silent`, `recordings`, `epg`, ...); `tests/_stress.py` has the shared
+test data. Some assert on timing (retry pauses), so keep their margins generous
+if you change them.
+
 ## Matching the Fetch app
 
 So that Fetch's service sees an ordinary client, requests mirror what the Fetch

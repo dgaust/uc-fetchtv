@@ -44,26 +44,35 @@ def init(config_dir: str) -> None:
         _LOG.info("No saved Fetch account found - setup is required")
 
 
-def _load() -> tuple[str | None, str | None, list[dict]]:
+def _read() -> dict:
+    """The saved settings, or an empty dict if there are none or they can't be read."""
     if not _config_path or not os.path.exists(_config_path):
-        return None, None, []
+        return {}
     try:
         with open(_config_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("activation_code"), data.get("pin"), data.get("boxes", [])
     except (OSError, ValueError) as ex:
         _LOG.error("Cannot read config file %s: %s", _config_path, ex)
-        return None, None, []
+        return {}
+    if not isinstance(data, dict):
+        _LOG.error("Config file %s is not in the expected form", _config_path)
+        return {}
+    return data
+
+
+def _load() -> tuple[str | None, str | None, list[dict]]:
+    data = _read()
+    code, pin, boxes = data.get("activation_code"), data.get("pin"), data.get("boxes")
+    code = code if isinstance(code, str) else None
+    pin = pin if isinstance(pin, str) else None
+    # Only boxes that can be registered: each needs a terminal id.
+    boxes = [b for b in boxes if isinstance(b, dict) and b.get("terminal_id")] if isinstance(boxes, list) else []
+    return code, pin, boxes
 
 
 def _load_value(key: str) -> str | None:
-    if not _config_path or not os.path.exists(_config_path):
-        return None
-    try:
-        with open(_config_path, "r", encoding="utf-8") as f:
-            return json.load(f).get(key)
-    except (OSError, ValueError):
-        return None
+    value = _read().get(key)
+    return value if isinstance(value, str) and value else None
 
 
 def _load_device_id() -> str | None:
@@ -131,14 +140,24 @@ def set_boxes(boxes: list[dict]) -> None:
 def _write() -> None:
     if not _config_path:
         return
+    # Written to a file of its own and moved into place, so a crash or a full
+    # disk in the middle leaves the old settings (and the account) intact, and
+    # readable by the driver's user only: it holds the activation code and PIN.
+    tmp = _config_path + ".tmp"
     try:
-        with open(_config_path, "w", encoding="utf-8") as f:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump({"activation_code": _activation_code, "pin": _pin, "boxes": _boxes,
                        "device_id": _device_id, "drm_id": _drm_id}, f)
             f.flush()
             # The sandboxed custom-driver process can be killed shortly after a
             # setup completes - fsync so the write survives that.
             os.fsync(f.fileno())
+        os.replace(tmp, _config_path)
         _LOG.info("Saved config: %s", _config_path)
-    except OSError as ex:
+    except (OSError, TypeError, ValueError) as ex:
         _LOG.error("Cannot write config file %s: %s", _config_path, ex)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass

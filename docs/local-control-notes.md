@@ -28,7 +28,7 @@ state it reports to Fetch's cloud (`ipAddress`).
   is a media *server* only (a `ContentDirectory` and a `ConnectionManager`, no
   `AVTransport` or `RenderingControl`), so it can't be told to play one on the
   box. The driver's recordings list comes from the cloud report instead, and
-  playing a recording on the box still needs Fetch's own message (unknown).
+  playing a recording is Fetch's own `PLAY_ASSET` message (below).
 - **Remote control, state and channel changes**: no documented local interface
   was found. If the Fetch mobile app talks to the box directly when you are on
   the same Wi-Fi, it would be through ports 80, 8060 or 56790, whose requests

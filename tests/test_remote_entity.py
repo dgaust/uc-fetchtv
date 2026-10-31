@@ -168,6 +168,8 @@ assert run("send_cmd", {"command": "VOLUME_UP"}) == StatusCodes.OK and client.se
 assert run("send_cmd", {"command": "VOLUME_DOWN"}) == StatusCodes.OK and client.sent[-1] == ("volume", 15)
 box.volume = None
 client.sent.clear()
+# With no level known there is nothing to step from: nothing is sent.
+assert run("send_cmd", {"command": "VOLUME_UP"}) == StatusCodes.SERVICE_UNAVAILABLE and client.sent == []
 assert run("send_cmd", {"command": "TYPE:hello world"}) == StatusCodes.OK and client.sent == [("type", "hello world")]
 for bad in ("TYPE:", "TYPE:" + "x" * 65, "TYPE:caf\u00e9", "TYPE:tab\there"):
     assert run("send_cmd", {"command": bad}) == StatusCodes.BAD_REQUEST, bad
